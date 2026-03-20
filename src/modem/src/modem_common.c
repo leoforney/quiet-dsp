@@ -175,6 +175,14 @@ MODEM() MODEM(_create)(modulation_scheme _scheme)
     case LIQUID_MODEM_QAM64:    return MODEM(_create_qam)(6);
     case LIQUID_MODEM_QAM128:   return MODEM(_create_qam)(7);
     case LIQUID_MODEM_QAM256:   return MODEM(_create_qam)(8);
+    case LIQUID_MODEM_QAM512:   return MODEM(_create_qam)(9);
+    case LIQUID_MODEM_QAM1024:  return MODEM(_create_qam)(10);
+    case LIQUID_MODEM_QAM2048:  return MODEM(_create_qam)(11);
+    case LIQUID_MODEM_QAM4096:  return MODEM(_create_qam)(12);
+    case LIQUID_MODEM_QAM8192:  return MODEM(_create_qam)(13);
+    case LIQUID_MODEM_QAM16384: return MODEM(_create_qam)(14);
+    case LIQUID_MODEM_QAM32768: return MODEM(_create_qam)(15);
+    case LIQUID_MODEM_QAM65536: return MODEM(_create_qam)(16);
 
     // amplitude phase-shift keying (APSK)
     case LIQUID_MODEM_APSK4:    return MODEM(_create_apsk)(2);
@@ -198,6 +206,7 @@ MODEM() MODEM(_create)(modulation_scheme _scheme)
     case LIQUID_MODEM_ARB128OPT: return MODEM(_create_arb128opt)();
     case LIQUID_MODEM_ARB256OPT: return MODEM(_create_arb256opt)();
     case LIQUID_MODEM_ARB64VT:   return MODEM(_create_arb64vt)();
+    case LIQUID_MODEM_ARB64UI:   return MODEM(_create_arb64ui)();
     
     // arbitrary modem
     case LIQUID_MODEM_ARB:
@@ -455,8 +464,8 @@ void MODEM(_demodulate_soft_table)(MODEM() _q,
     // set and initialize minimum bit values
     unsigned int i;
     unsigned int k;
-    T dmin_0[bps];
-    T dmin_1[bps];
+    T *dmin_0 = (T*) alloca(bps*sizeof(T));
+    T *dmin_1 = (T*) alloca(bps*sizeof(T));
     for (k=0; k<bps; k++) {
         dmin_0[k] = 8.0f;
         dmin_1[k] = 8.0f;
@@ -623,7 +632,7 @@ void MODEM(_demodsoft_gentab)(MODEM()      _q,
     // generate constellation
     // TODO : enforce full constellation for modulation
     unsigned int M = _q->M;  // constellation size
-    TC c[M];         // constellation
+    TC *c = (TC*) alloca((M)*sizeof(TC));         // constellation
     for (i=0; i<M; i++)
         modem_modulate(_q, i, &c[i]);
 

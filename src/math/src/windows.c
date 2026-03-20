@@ -32,11 +32,14 @@
 //  [harris:1978] frederic j. harris, "On the Use of Windows for Harmonic
 //      Analysis with the Discrete Fourier Transform," Proceedings of the
 //      IEEE, vol. 66, no. 1, January, 1978.
+//  [Nuttall:1981] Albert H. Nuttall, "Some Windows with Very Good Sidelobe
+//      Behavior,"  IEEE Transactions on Acoustics, Speech, and Signal
+//      Processing, vol. ASSP-29, no. 1, pp. 84-91, February, 1981.
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+
 
 #include "liquid.internal.h"
 
@@ -84,7 +87,7 @@ liquid_window_type liquid_getopt_str2window(const char * _str)
     unsigned int i;
     for (i=0; i<LIQUID_WINDOW_NUM_FUNCTIONS; i++) {
         if (strcmp(_str,liquid_window_str[i][0])==0) {
-            return i;
+            return (liquid_window_type)i;
         }
     }
 
@@ -157,7 +160,7 @@ void liquid_kbd_window(unsigned int _n,
     unsigned int M = _n / 2;
 
     // generate regular Kaiser window, length M+1
-    float w_kaiser[M+1];
+    float *w_kaiser = (float*) alloca((M+1)*sizeof(float));
     for (i=0; i<=M; i++)
         w_kaiser[i] = kaiser(i,M+1,_beta,0.0f);
 
@@ -208,7 +211,7 @@ float kaiser(unsigned int _n,
     return a / b;
 }
 
-// Hamming window
+// Hamming window [Nuttall:1981]
 float hamming(unsigned int _n,
               unsigned int _N)
 {
@@ -218,7 +221,6 @@ float hamming(unsigned int _n,
         exit(1);
     }
 
-    // TODO add reference
     return 0.53836 - 0.46164*cosf( (2*M_PI*(float)_n) / ((float)(_N-1)) );
 }
 

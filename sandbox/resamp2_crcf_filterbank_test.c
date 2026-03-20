@@ -35,9 +35,9 @@ int main() {
     unsigned int n = N/2;
 
     // arrays
-    float complex x[N];             // input time series
-    float complex y[n][2];          // output time series (channelized)
-    float complex z[N];             // output time series
+    liquid_float_complex x[N];             // input time series
+    liquid_float_complex y[n][2];          // output time series (channelized)
+    liquid_float_complex z[N];             // output time series
 
     // generate input sequence
     unsigned int i;
@@ -59,7 +59,7 @@ int main() {
         resamp2_crcf_analyzer_execute(q, &x[2*i], &y[i][0]);
 
     // clear resampler
-    resamp2_crcf_clear(q);
+    resamp2_crcf_reset(q);
 
     // run the resampler as a two-channel synthesis filterbank
     for (i=0; i<n; i++)

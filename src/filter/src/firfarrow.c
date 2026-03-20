@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007 - 2015 Joseph Gaeddert
+ * Copyright (c) 2007 - 2018 Joseph Gaeddert
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>
+
 
 #define FIRFARROW_USE_DOTPROD 1
 
@@ -80,6 +80,9 @@ FIRFARROW() FIRFARROW(_create)(unsigned int _h_len,
         exit(1);
     } else if (_fc < 0.0f || _fc > 0.5f) {
         fprintf(stderr,"error: firfarrow_%s_create(), filter cutoff must be in [0,0.5]\n", EXTENSION_FULL);
+        exit(1);
+    } else if (_As < 0.0f) {
+        fprintf(stderr,"error: firfarrow_%s_create(), filter stop-band attenuation must be greater than zero\n", EXTENSION_FULL);
         exit(1);
     }
 
@@ -160,7 +163,7 @@ void FIRFARROW(_print)(FIRFARROW() _q)
 void FIRFARROW(_reset)(FIRFARROW() _q)
 {
 #if FIRFARROW_USE_DOTPROD
-    WINDOW(_clear)(_q->w);
+    WINDOW(_reset)(_q->w);
 #else
     unsigned int i;
     for (i=0; i<_q->h_len; i++)
@@ -188,11 +191,11 @@ void FIRFARROW(_push)(FIRFARROW() _q,
 //  _q      : firfarrow object
 //  _mu     : fractional sample delay
 void FIRFARROW(_set_delay)(FIRFARROW() _q,
-                           float _mu)
+                           float       _mu)
 {
     // validate input
     if (_mu < -1.0f || _mu > 1.0f) {
-        fprintf(stderr,"warning: firfarrow_%s_set_delay(), delay out of range\n", EXTENSION_FULL);
+        fprintf(stderr,"warning: firfarrow_%s_set_delay(), delay must be in [-1,1]\n", EXTENSION_FULL);
     }
 
     unsigned int i, n=0;
@@ -272,13 +275,13 @@ void FIRFARROW(_get_coefficients)(FIRFARROW() _q,
 //  _H      : output frequency response
 void FIRFARROW(_freqresponse)(FIRFARROW() _q,
                               float _fc,
-                              float complex * _H)
+                              liquid_float_complex * _H)
 {
     unsigned int i;
-    float complex H = 0.0f;
+    liquid_float_complex H = 0.0f;
 
     for (i=0; i<_q->h_len; i++)
-        H += _q->h[i] * cexpf(_Complex_I*2*M_PI*_fc*i);
+        H += _q->h[i] * cexpf(_Complex_I*(float)(2*M_PI*_fc*i));
 
     // set return value
     *_H = H;
@@ -291,7 +294,7 @@ float FIRFARROW(_groupdelay)(FIRFARROW() _q,
                              float _fc)
 {
     // copy coefficients to be in correct order
-    float h[_q->h_len];
+    float *h = (float*)alloca(_q->h_len*sizeof(float));
     unsigned int i;
     unsigned int n = _q->h_len;
     for (i=0; i<n; i++)
@@ -312,9 +315,9 @@ void FIRFARROW(_genpoly)(FIRFARROW() _q)
     // TODO : shy away from 'float' and use 'TC' types
     unsigned int i, j, n=0;
     float x, mu, h0, h1;
-    float mu_vect[_q->Q+1];
-    float hp_vect[_q->Q+1];
-    float p[_q->Q];
+    float *mu_vect = (float*)alloca((_q->Q+1)*sizeof(float));
+    float *hp_vect = (float*)alloca((_q->Q+1)*sizeof(float));
+    float *p = (float*)alloca(_q->Q*sizeof(float));
     float beta = kaiser_beta_As(_q->As);
     for (i=0; i<_q->h_len; i++) {
 #if FIRFARROW_DEBUG
@@ -365,6 +368,5 @@ void FIRFARROW(_genpoly)(FIRFARROW() _q)
     for (i=0; i<_q->h_len; i++)      // compute DC response
         _q->gamma += _q->h[i];
     _q->gamma = 1.0f / (_q->gamma);   // invert result
-
 }
 

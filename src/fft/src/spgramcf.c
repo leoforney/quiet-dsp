@@ -32,12 +32,13 @@
 // name-mangling macros
 #define ASGRAM(name)        LIQUID_CONCAT(asgramcf,name)
 #define SPGRAM(name)        LIQUID_CONCAT(spgramcf,name)
+#define SPWATERFALL(name)   LIQUID_CONCAT(spwaterfallcf,name)
 #define WINDOW(name)        LIQUID_CONCAT(windowcf,name)
 #define FFT(name)           LIQUID_CONCAT(fft,name)
 
 #define T                   float           // primitive type (real)
-#define TC                  float complex   // primitive type (complex)
-#define TI                  float complex   // input type
+#define TC                  liquid_float_complex   // primitive type (complex)
+#define TI                  liquid_float_complex   // input type
 
 #define TI_COMPLEX          1
 
@@ -48,4 +49,5 @@
 // source files
 #include "asgram.c"
 #include "spgram.c"
+#include "spwaterfall.c"
 

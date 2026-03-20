@@ -27,7 +27,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
+
 
 #include "liquid.internal.h"
 
@@ -164,7 +164,7 @@ void chromosome_printf(chromosome _q)
 }
 
 // clear chromosome (set traits to zero)
-void chromosome_clear(chromosome _q)
+void chromosome_reset(chromosome _q)
 {
     unsigned int i;
     for (i=0; i<_q->num_traits; i++)

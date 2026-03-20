@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007 - 2015 Joseph Gaeddert
+ * Copyright (c) 2007 - 2018 Joseph Gaeddert
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 // Least mean-squares (LMS) equalizer
 //
 
-#include <math.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -87,7 +87,7 @@ EQLMS() EQLMS(_create)(T *          _h,
 }
 
 // create square-root Nyquist interpolator
-//  _type   :   filter type (e.g. LIQUID_RNYQUIST_RRC)
+//  _type   :   filter type (e.g. LIQUID_FIRFILT_RRC)
 //  _k      :   samples/symbol _k > 1
 //  _m      :   filter delay (symbols), _m > 0
 //  _beta   :   excess bandwidth factor, 0 < _beta < 1
@@ -115,13 +115,13 @@ EQLMS() EQLMS(_create_rnyquist)(int          _type,
 
     // generate square-root Nyquist filter
     unsigned int h_len = 2*_k*_m + 1;
-    float h[h_len];
-    liquid_firdes_prototype(_type,_k,_m,_beta,_dt,h);
+    float *h = (float*)alloca(h_len*sizeof(float));
+    liquid_firdes_prototype((liquid_firfilt_type)_type,_k,_m,_beta,_dt,h);
 
-    // copy coefficients to type-specific array (e.g. float complex)
+    // copy coefficients to type-specific array (e.g. liquid_float_complex)
     // and scale by samples/symbol
     unsigned int i;
-    T hc[h_len];
+    T * hc = (T*) alloca(h_len*sizeof(T));
     for (i=0; i<h_len; i++)
         hc[i] = h[i] / (float)_k;
 
@@ -145,12 +145,12 @@ EQLMS() EQLMS(_create_lowpass)(unsigned int _h_len,
     }
 
     // generate low-pass filter prototype
-    float h[_h_len];
+    float *h = (float*) alloca(_h_len*sizeof(float));
     liquid_firdes_kaiser(_h_len, _fc, 40.0f, 0.0f, h);
 
-    // copy coefficients to type-specific array (e.g. float complex)
+    // copy coefficients to type-specific array (e.g. liquid_float_complex)
     unsigned int i;
-    T hc[_h_len];
+    T * hc = (T*) alloca(_h_len*sizeof(T));
     for (i=0; i<_h_len; i++)
         hc[i] = h[i];
 
@@ -201,8 +201,8 @@ void EQLMS(_reset)(EQLMS() _q)
     // copy default coefficients
     memmove(_q->w0, _q->h0, (_q->h_len)*sizeof(T));
 
-    WINDOW(_clear)(_q->buffer);
-    wdelayf_clear(_q->x2);
+    WINDOW(_reset)(_q->buffer);
+    wdelayf_reset(_q->x2);
 
     // reset input count
     _q->count = 0;

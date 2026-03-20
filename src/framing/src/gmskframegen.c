@@ -27,9 +27,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
+
 #include <assert.h>
-#include <complex.h>
+
 
 #include "liquid.internal.h"
 
@@ -37,11 +37,17 @@
 
 // gmskframegen
 void gmskframegen_encode_header( gmskframegen _q, const unsigned char * _header);
-void gmskframegen_write_preamble(gmskframegen _q, float complex * _y);
-void gmskframegen_write_header(  gmskframegen _q, float complex * _y);
-void gmskframegen_write_payload( gmskframegen _q, float complex * _y);
-void gmskframegen_write_tail(    gmskframegen _q, float complex * _y);
+void gmskframegen_write_preamble(gmskframegen _q, liquid_float_complex * _y);
+void gmskframegen_write_header(  gmskframegen _q, liquid_float_complex * _y);
+void gmskframegen_write_payload( gmskframegen _q, liquid_float_complex * _y);
+void gmskframegen_write_tail(    gmskframegen _q, liquid_float_complex * _y);
 
+enum state {
+    STATE_PREAMBLE,         // preamble
+    STATE_HEADER,           // header
+    STATE_PAYLOAD,          // payload (frame)
+    STATE_TAIL,             // tail symbols
+};
 
 // gmskframe object structure
 struct gmskframegen_s {
@@ -61,8 +67,10 @@ struct gmskframegen_s {
     msequence ms_preamble;      // preamble p/n sequence
 
     // header
-    unsigned char * header_dec; // uncoded header [GMSKFRAME_H_DEC]
-    unsigned char * header_enc; // encoded header [GMSKFRAME_H_ENC]
+    unsigned int header_user_len;
+    unsigned int header_enc_len;
+    unsigned char * header_dec; // uncoded header [header_user_len + GMSKFRAME_H_DEC]
+    unsigned char * header_enc; // encoded header [header_enc_len]
     packetizer p_header;        // header packetizer
 
     // payload
@@ -75,12 +83,7 @@ struct gmskframegen_s {
     unsigned char * payload_enc;// encoded payload
 
     // framing state
-    enum {
-        STATE_PREAMBLE,         // preamble
-        STATE_HEADER,           // header
-        STATE_PAYLOAD,          // payload (frame)
-        STATE_TAIL,             // tail symbols
-    } state;
+    enum state state;
     int frame_assembled;        // frame assembled flag
     int frame_complete;         // frame completed flag
     unsigned int symbol_counter;//
@@ -107,14 +110,13 @@ gmskframegen gmskframegen_create()
     // preamble objects/arrays
     q->ms_preamble = msequence_create(6, 0x6d, 1);
 
-    // header objects/arrays
-    q->header_dec = (unsigned char*)malloc(GMSKFRAME_H_DEC*sizeof(unsigned char));
-    q->header_enc = (unsigned char*)malloc(GMSKFRAME_H_ENC*sizeof(unsigned char));
-    q->header_len = GMSKFRAME_H_ENC * 8;
-    q->p_header   = packetizer_create(GMSKFRAME_H_DEC,
-                                      GMSKFRAME_H_CRC,
-                                      GMSKFRAME_H_FEC,
-                                      LIQUID_FEC_NONE);
+    // reset framing object
+    gmskframegen_reset(q);
+
+    q->header_dec = NULL;
+    q->header_enc = NULL;
+    q->p_header   = NULL;
+    gmskframegen_set_header_len(q, GMSKFRAME_H_USER_DEFAULT);
 
     // payload objects/arrays
     q->dec_msg_len = 0;
@@ -131,9 +133,6 @@ gmskframegen gmskframegen_create()
 
     // allocate memory for encoded packet
     q->payload_enc = (unsigned char*) malloc(q->enc_msg_len*sizeof(unsigned char));
-
-    // reset framing object
-    gmskframegen_reset(q);
 
     // return object
     return q;
@@ -202,6 +201,32 @@ void gmskframegen_print(gmskframegen _q)
     printf("  total samples     :   %-4u sampels\n", gmskframegen_getframelen(_q));
 }
 
+void gmskframegen_set_header_len(gmskframegen _q,
+                                 unsigned int _len)
+{
+    if (_q->frame_assembled) {
+        fprintf(stderr, "warning: gmskframegen_set_header_len(), frame is already assembled; must reset() first\n");
+        return;
+    }
+
+    _q->header_user_len = _len;
+    unsigned int header_dec_len = GMSKFRAME_H_DEC + _q->header_user_len;
+    _q->header_dec = (unsigned char*)realloc(_q->header_dec, header_dec_len*sizeof(unsigned char));
+
+    if (_q->p_header) {
+        packetizer_destroy(_q->p_header);
+    }
+
+    _q->p_header = packetizer_create(header_dec_len,
+                                     GMSKFRAME_H_CRC,
+                                     GMSKFRAME_H_FEC,
+                                     LIQUID_FEC_NONE);
+
+    _q->header_enc_len = packetizer_get_enc_msg_len(_q->p_header);
+    _q->header_enc = (unsigned char*)realloc(_q->header_enc, _q->header_enc_len*sizeof(unsigned char));
+    _q->header_len = _q->header_enc_len * 8;
+}
+
 // assemble frame
 //  _q              :   frame generator object
 //  _header         :   raw header
@@ -261,7 +286,7 @@ unsigned int gmskframegen_getframelen(gmskframegen _q)
 
     unsigned int num_frame_symbols =
             _q->preamble_len +      // number of preamble p/n symbols
-            GMSKFRAME_H_SYM +       // number of header symbols
+            _q->header_len +        // number of header symbols
             _q->payload_len +       // number of payload symbols
             2*_q->m;                // number of tail symbols
 
@@ -270,7 +295,7 @@ unsigned int gmskframegen_getframelen(gmskframegen _q)
 
 // write sample to output buffer
 int gmskframegen_write_samples(gmskframegen _q,
-                               float complex * _y)
+                               liquid_float_complex * _y)
 {
     switch (_q->state) {
     case STATE_PREAMBLE:
@@ -319,8 +344,8 @@ void gmskframegen_encode_header(gmskframegen          _q,
                                 const unsigned char * _header)
 {
     // first 'n' bytes user data
-    memmove(_q->header_dec, _header, GMSKFRAME_H_USER);
-    unsigned int n = GMSKFRAME_H_USER;
+    memmove(_q->header_dec, _header, _q->header_user_len);
+    unsigned int n = _q->header_user_len;
 
     // first byte is for expansion/version validation
     _q->header_dec[n+0] = GMSKFRAME_VERSION;
@@ -341,7 +366,7 @@ void gmskframegen_encode_header(gmskframegen          _q,
     packetizer_encode(_q->p_header, _q->header_dec, _q->header_enc);
 
     // scramble header
-    scramble_data(_q->header_enc, GMSKFRAME_H_ENC);
+    scramble_data(_q->header_enc, _q->header_enc_len);
 #if 0
     printf("    header_enc      :");
     unsigned int i;
@@ -352,7 +377,7 @@ void gmskframegen_encode_header(gmskframegen          _q,
 }
 
 void gmskframegen_write_preamble(gmskframegen    _q,
-                                 float complex * _y)
+                                 liquid_float_complex * _y)
 {
     unsigned char bit = msequence_advance(_q->ms_preamble);
     gmskmod_modulate(_q->mod, bit, _y);
@@ -374,7 +399,7 @@ void gmskframegen_write_preamble(gmskframegen    _q,
 }
 
 void gmskframegen_write_header(gmskframegen    _q,
-                               float complex * _y)
+                               liquid_float_complex * _y)
 {
     div_t d = div(_q->symbol_counter, 8);
     unsigned int byte_index = d.quot;
@@ -393,7 +418,7 @@ void gmskframegen_write_header(gmskframegen    _q,
 }
 
 void gmskframegen_write_payload(gmskframegen    _q,
-                                float complex * _y)
+                                liquid_float_complex * _y)
 {
     div_t d = div(_q->symbol_counter, 8);
     unsigned int byte_index = d.quot;
@@ -412,7 +437,7 @@ void gmskframegen_write_payload(gmskframegen    _q,
 }
 
 void gmskframegen_write_tail(gmskframegen    _q,
-                             float complex * _y)
+                             liquid_float_complex * _y)
 {
     unsigned char bit = rand() % 2;
     gmskmod_modulate(_q->mod, bit, _y);

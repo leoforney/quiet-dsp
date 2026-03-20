@@ -27,7 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+
 
 #include "liquid.internal.h"
 
@@ -212,7 +212,7 @@ void bsequence_init_msequence(bsequence _bs,
 #endif
 
     // clear binary sequence
-    bsequence_clear(_bs);
+    bsequence_reset(_bs);
 
     unsigned int i;
     for (i=0; i<(_ms->n); i++)

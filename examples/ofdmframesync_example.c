@@ -33,15 +33,15 @@ void usage()
 //  _p          : subcarrier allocation array [size: _M x 1]
 //  _M          : number of subcarriers
 //  _userdata   : user-defined data pointer
-static int callback(float complex * _X,
+static int callback(liquid_float_complex * _X,
                     unsigned char * _p,
                     unsigned int    _M,
                     void *          _userdata);
 
 // custom data type to pass to callback function
 struct rx_symbols {
-    float complex syms_bpsk[2000];  // even subcarrier symbols
-    float complex syms_qpsk[2000];  // odd subcarrier symbols
+    liquid_float_complex syms_bpsk[2000];  // even subcarrier symbols
+    liquid_float_complex syms_qpsk[2000];  // odd subcarrier symbols
     unsigned int  num_bpsk;         // counter
     unsigned int  num_qpsk;         // counter
 };
@@ -83,8 +83,8 @@ int main(int argc, char*argv[])
     float        gamma       = powf(10.0f, (SNRdB + noise_floor)/20.0f);
 
     unsigned char p[M];
-    float complex X[M];             // channelized symbols
-    float complex y[num_samples];   // output time series
+    liquid_float_complex X[M];             // channelized symbols
+    liquid_float_complex y[num_samples];   // output time series
 
     // initialize subcarrier allocation
     ofdmframe_init_default_sctype(M, p);
@@ -168,9 +168,7 @@ int main(int argc, char*argv[])
     // estimate power spectral density of received signal
     unsigned int nfft = 1024;   // FFT size
     float        psd[nfft];     // PSD estimate output array
-    spgramcf periodogram = spgramcf_create_default(nfft);
-    spgramcf_estimate_psd(periodogram, y, num_samples, psd);
-    spgramcf_destroy(periodogram);
+    spgramcf_estimate_psd(nfft, y, num_samples, psd);
 
     // 
     // export output file
@@ -244,7 +242,7 @@ int main(int argc, char*argv[])
 //  _p          : subcarrier allocation array [size: _M x 1]
 //  _M          : number of subcarriers
 //  _userdata   : user-defined data pointer
-static int callback(float complex * _X,
+static int callback(liquid_float_complex * _X,
                     unsigned char * _p,
                     unsigned int    _M,
                     void *          _userdata)

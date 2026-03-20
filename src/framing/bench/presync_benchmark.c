@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007 - 2015 Joseph Gaeddert
+ * Copyright (c) 2007 - 2018 Joseph Gaeddert
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ void presync_cccf_bench(struct rusage *     _start,
     *_num_iterations /= _m;
 
     // generate sequence (random)
-    float complex h[_n];
+    liquid_float_complex h[_n];
     unsigned long int i;
     for (i=0; i<_n; i++) {
         h[i] = (rand() % 2 ? 1.0f : -1.0f) +
@@ -51,26 +51,26 @@ void presync_cccf_bench(struct rusage *     _start,
     presync_cccf q = presync_cccf_create(h, _n, 0.1f, _m);
 
     // input sequence (random)
-    float complex x[7];
+    liquid_float_complex x[7];
     for (i=0; i<7; i++) {
         x[i] = (rand() % 2 ? 1.0f : -1.0f) +
                (rand() % 2 ? 1.0f : -1.0f)*_Complex_I;
     }
 
-    float complex rxy;
+    liquid_float_complex rxy;
     float dphi_hat;
 
     // start trials
     getrusage(RUSAGE_SELF, _start);
     for (i=0; i<(*_num_iterations); i++) {
         // push input sequence through synchronizer
-        presync_cccf_push(q, x[0]);  presync_cccf_correlate(q, &rxy, &dphi_hat);
-        presync_cccf_push(q, x[1]);  presync_cccf_correlate(q, &rxy, &dphi_hat);
-        presync_cccf_push(q, x[2]);  presync_cccf_correlate(q, &rxy, &dphi_hat);
-        presync_cccf_push(q, x[3]);  presync_cccf_correlate(q, &rxy, &dphi_hat);
-        presync_cccf_push(q, x[4]);  presync_cccf_correlate(q, &rxy, &dphi_hat);
-        presync_cccf_push(q, x[5]);  presync_cccf_correlate(q, &rxy, &dphi_hat);
-        presync_cccf_push(q, x[6]);  presync_cccf_correlate(q, &rxy, &dphi_hat);
+        presync_cccf_push(q, x[0]);  presync_cccf_execute(q, &rxy, &dphi_hat);
+        presync_cccf_push(q, x[1]);  presync_cccf_execute(q, &rxy, &dphi_hat);
+        presync_cccf_push(q, x[2]);  presync_cccf_execute(q, &rxy, &dphi_hat);
+        presync_cccf_push(q, x[3]);  presync_cccf_execute(q, &rxy, &dphi_hat);
+        presync_cccf_push(q, x[4]);  presync_cccf_execute(q, &rxy, &dphi_hat);
+        presync_cccf_push(q, x[5]);  presync_cccf_execute(q, &rxy, &dphi_hat);
+        presync_cccf_push(q, x[6]);  presync_cccf_execute(q, &rxy, &dphi_hat);
     }
     getrusage(RUSAGE_SELF, _finish);
     *_num_iterations *= 7;

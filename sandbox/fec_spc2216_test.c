@@ -259,7 +259,7 @@ int main(int argc, char*argv[])
     unsigned int num_trials=10000;          // number of trials
 
     // arrays
-    float complex sym_rec[8*61];            // received BPSK symbols
+    liquid_float_complex sym_rec[8*61];            // received BPSK symbols
     unsigned int bit_errors_hard[num_snr];
     unsigned int bit_errors_soft[num_snr];
 
@@ -560,16 +560,19 @@ void spc2216_unpack(unsigned char * _v,
     // unpack row parities
     unsigned int i;
     unsigned int k=0;
+    unsigned int temp;
     for (i=0; i<16; i++) {
         //liquid_unpack_array(&_pr[k], &_v[32*8+k], 
-        liquid_unpack_array(&_v[32], 29, k, 6, &_pr[i]);
+        liquid_unpack_array(&_v[32], 29, k, 6, &temp);
+        _pr[i] = temp;
         k += 6;
     }
 
     // unpack column parities
     for (i=0; i<22; i++) {
         //liquid_unpack_array(&_pr[k], &_v[32*8+k], 
-        liquid_unpack_array(&_v[32], 29, k, 6, &_pc[i]);
+        liquid_unpack_array(&_v[32], 29, k, 6, &temp);
+        _pc[i] = temp;
         k += 6;
     }
 }

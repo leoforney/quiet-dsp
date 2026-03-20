@@ -44,9 +44,9 @@ unsigned int packetizer_compute_enc_msg_len(unsigned int _n,
                                             int _fec0,
                                             int _fec1)
 {
-    unsigned int k = _n + crc_get_length(_crc);
-    unsigned int n0 = fec_get_enc_msg_length(_fec0, k);
-    unsigned int n1 = fec_get_enc_msg_length(_fec1, n0);
+    unsigned int k = _n + crc_get_length((crc_scheme)_crc);
+    unsigned int n0 = fec_get_enc_msg_length((fec_scheme)_fec0, k);
+    unsigned int n1 = fec_get_enc_msg_length((fec_scheme)_fec1, n0);
 
     return n1;
 }
@@ -98,8 +98,8 @@ packetizer packetizer_create(unsigned int _n,
     packetizer p = (packetizer) malloc(sizeof(struct packetizer_s));
 
     p->msg_len      = _n;
-    p->packet_len   = packetizer_compute_enc_msg_len(_n, _crc, _fec0, _fec1);
-    p->check        = _crc;
+    p->packet_len   = packetizer_compute_enc_msg_len(_n, (crc_scheme)_crc, (fec_scheme)_fec0, (fec_scheme)_fec1);
+    p->check        = (crc_scheme)_crc;
     p->crc_length   = crc_get_length(p->check);
 
     // allocate memory for buffers (scale by 8 for soft decoding)
@@ -116,7 +116,7 @@ packetizer packetizer_create(unsigned int _n,
     unsigned int n0 = _n + p->crc_length;
     for (i=0; i<p->plan_len; i++) {
         // set schemes
-        p->plan[i].fs = (i==0) ? _fec0 : _fec1;
+        p->plan[i].fs = (i==0) ? (fec_scheme)_fec0 : (fec_scheme)_fec1;
 
         // compute lengths
         p->plan[i].dec_msg_len = n0;
@@ -165,17 +165,21 @@ packetizer packetizer_recreate(packetizer _p,
     {
         // no change; return input pointer
         return _p;
-    } else {
-        // something has changed; destroy old object and create new one
-        // TODO : rather than completely destroying object, only change values that are necessary
-        packetizer_destroy(_p);
-        return packetizer_create(_n,_crc,_fec0,_fec1);
     }
+
+    // something has changed; destroy old object and create new one
+    // TODO : rather than completely destroying object, only change values that are necessary
+    packetizer_destroy(_p);
+    return packetizer_create(_n,_crc,_fec0,_fec1);
 }
 
 // destroy packetizer object
 void packetizer_destroy(packetizer _p)
 {
+    if (!_p) {
+        return;
+    }
+
     // free fec, interleaver objects
     unsigned int i;
     for (i=0; i<_p->plan_len; i++) {
@@ -250,8 +254,14 @@ void packetizer_encode(packetizer            _p,
 {
     unsigned int i;
 
-    // copy input message to internal buffer[0]
-    memmove(_p->buffer_0, _msg, _p->msg_len);
+    // copy input message to internal buffer[0] (or initialize to zeros)
+    if (_msg != NULL) {
+        // copy user-defined input
+        memmove(_p->buffer_0, _msg, _p->msg_len);
+    } else {
+        // initialize with zeros
+        memset(_p->buffer_0, 0x00, _p->msg_len);
+    }
 
     // compute crc, append to buffer
     unsigned int key = crc_generate_key(_p->check, _p->buffer_0, _p->msg_len);
@@ -262,6 +272,9 @@ void packetizer_encode(packetizer            _p,
         // shift key by 8 bits
         key >>= 8;
     }
+
+    // whiten input sequence
+    scramble_data(_p->buffer_0, _p->msg_len + _p->crc_length);
 
     // execute fec/interleaver plans
     for (i=0; i<_p->plan_len; i++) {
@@ -308,6 +321,9 @@ int packetizer_decode(packetizer            _p,
                    _p->buffer_1,
                    _p->buffer_0);
     }
+
+    // remove sequence whitening
+    unscramble_data(_p->buffer_0, _p->msg_len + _p->crc_length);
 
     // strip crc, validate message
     unsigned int key = 0;
@@ -369,6 +385,9 @@ int packetizer_decode_soft(packetizer            _p,
                _p->plan[0].dec_msg_len,
                _p->buffer_1,
                _p->buffer_0);
+
+    // remove sequence whitening
+    unscramble_data(_p->buffer_0, _p->msg_len + _p->crc_length);
 
     // strip crc, validate message
     unsigned int key = 0;

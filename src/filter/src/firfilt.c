@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007 - 2015 Joseph Gaeddert
+ * Copyright (c) 2007 - 2018 Joseph Gaeddert
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -118,11 +118,11 @@ FIRFILT() FIRFILT(_create_kaiser)(unsigned int _n,
     }
 
     // compute temporary array for holding coefficients
-    float hf[_n];
+    float *hf = (float*) alloca(_n*sizeof(float));
     liquid_firdes_kaiser(_n, _fc, _As, _mu, hf);
 
     // copy coefficients to type-specific array
-    TC h[_n];
+    TC *h = (TC*) alloca(_n*sizeof(TC));
     unsigned int i;
     for (i=0; i<_n; i++)
         h[i] = (TC) hf[i];
@@ -132,7 +132,7 @@ FIRFILT() FIRFILT(_create_kaiser)(unsigned int _n,
 }
 
 // create from square-root Nyquist prototype
-//  _type   : filter type (e.g. LIQUID_RNYQUIST_RRC)
+//  _type   : filter type (e.g. LIQUID_FIRFILT_RRC)
 //  _k      : nominal samples/symbol, _k > 1
 //  _m      : filter delay [symbols], _m > 0
 //  _beta   : rolloff factor, 0 < beta <= 1
@@ -157,12 +157,12 @@ FIRFILT() FIRFILT(_create_rnyquist)(int          _type,
 
     // generate square-root Nyquist filter
     unsigned int h_len = 2*_k*_m + 1;
-    float hf[h_len];
-    liquid_firdes_prototype(_type,_k,_m,_beta,_mu,hf);
+    float *hf = (float*) alloca(h_len*sizeof(float));
+    liquid_firdes_prototype((liquid_firfilt_type)_type,_k,_m,_beta,_mu,hf);
 
-    // copy coefficients to type-specific array (e.g. float complex)
+    // copy coefficients to type-specific array (e.g. liquid_float_complex)
     unsigned int i;
-    TC hc[h_len];
+    TC *hc = (TC*) alloca(h_len*sizeof(TC));
     for (i=0; i<h_len; i++)
         hc[i] = hf[i];
 
@@ -180,13 +180,13 @@ FIRFILT() FIRFILT(_create_rect)(unsigned int _n)
     }
 
     // create float array coefficients
-    float hf[_n];
+    float *hf = (float*) alloca(_n*sizeof(float));
     unsigned int i;
     for (i=0; i<_n; i++)
         hf[i] = 1.0f;
 
     // copy coefficients to type-specific array
-    TC h[_n];
+    TC *h = (TC*) alloca(_n*sizeof(TC));
     for (i=0; i<_n; i++)
         h[i] = (TC) hf[i];
 
@@ -229,9 +229,8 @@ FIRFILT() FIRFILT(_recreate)(FIRFILT() _q,
     for (i=_n; i>0; i--)
         _q->h[i-1] = _h[_n-i];
 
-    // re-create dot product object
-    DOTPROD(_destroy)(_q->dp);
-    _q->dp = DOTPROD(_create)(_q->h, _q->h_len);
+    // re-create internal dot product object
+    _q->dp = DOTPROD(_recreate)(_q->dp, _q->h, _q->h_len);
 
     return _q;
 }
@@ -253,7 +252,7 @@ void FIRFILT(_destroy)(FIRFILT() _q)
 void FIRFILT(_reset)(FIRFILT() _q)
 {
 #if LIQUID_FIRFILT_USE_WINDOW
-    WINDOW(_clear)(_q->w);
+    WINDOW(_reset)(_q->w);
 #else
     unsigned int i;
     for (i=0; i<_q->w_len; i++)
@@ -291,6 +290,13 @@ void FIRFILT(_set_scale)(FIRFILT() _q,
     _q->scale = _scale;
 }
 
+// get output scaling for filter
+void FIRFILT(_get_scale)(FIRFILT() _q,
+                         TC *      _scale)
+{
+    *_scale = _q->scale;
+}
+
 // push sample into filter object's internal buffer
 //  _q      :   filter object
 //  _x      :   input sample
@@ -312,6 +318,24 @@ void FIRFILT(_push)(FIRFILT() _q,
 
     // append value to end of buffer
     _q->w[_q->w_index + _q->h_len - 1] = _x;
+#endif
+}
+
+// Write block of samples into filter object's internal buffer
+//  _q      : filter object
+//  _x      : buffer of input samples, [size: _n x 1]
+//  _n      : number of input samples
+void FIRFILT(_write)(FIRFILT()    _q,
+                     TI *         _x,
+                     unsigned int _n)
+{
+#if LIQUID_FIRFILT_USE_WINDOW
+    WINDOW(_write)(_q->w, _x, _n);
+#else
+    // TODO: be smarter about this
+    unsigned int i;
+    for (i=0; i<_n; i++)
+        FIRFILT(_push)(_q, _x[i]);
 #endif
 }
 
@@ -370,14 +394,14 @@ unsigned int FIRFILT(_get_length)(FIRFILT() _q)
 //  _H      :   output frequency response
 void FIRFILT(_freqresponse)(FIRFILT()       _q,
                             float           _fc,
-                            float complex * _H)
+                            liquid_float_complex * _H)
 {
     unsigned int i;
-    float complex H = 0.0f;
+    liquid_float_complex H = 0.0f;
 
     // compute dot product between coefficients and exp{ 2 pi fc {0..n-1} }
     for (i=0; i<_q->h_len; i++)
-        H += _q->h[i] * cexpf(_Complex_I*2*M_PI*_fc*i);
+        H += _q->h[i] * cexpf(_Complex_I*(float)(2*M_PI*_fc*i));
 
     // apply scaling
     H *= _q->scale;
@@ -394,7 +418,7 @@ float FIRFILT(_groupdelay)(FIRFILT() _q,
                            float     _fc)
 {
     // copy coefficients to be in correct order
-    float h[_q->h_len];
+    float *h = (float*) alloca(_q->h_len*sizeof(float));
     unsigned int i;
     unsigned int n = _q->h_len;
     for (i=0; i<n; i++)

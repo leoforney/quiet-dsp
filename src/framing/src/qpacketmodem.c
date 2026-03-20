@@ -29,9 +29,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
+
 #include <assert.h>
-#include <complex.h>
+
 
 #include "liquid.internal.h"
 
@@ -42,10 +42,11 @@ struct qpacketmodem_s {
     unsigned int    bits_per_symbol;    // modulator bits/symbol
     unsigned int    payload_dec_len;    // number of decoded payload bytes
     unsigned char * payload_enc;        // payload data (encoded bytes)
-    unsigned char * payload_mod;        // payload symbols (modulator output, demod input)
+    unsigned int  * payload_mod;        // payload symbols (modulator output, demod input)
     unsigned int    payload_enc_len;    // number of encoded payload bytes
     unsigned int    payload_bit_len;    // number of bits in encoded payload
     unsigned int    payload_mod_len;    // number of symbols in encoded payload
+    unsigned int    n;                  // index into partially-received payload data
 };
 
 // create packet encoder
@@ -72,15 +73,17 @@ qpacketmodem qpacketmodem_create()
     q->payload_bit_len = 8*q->payload_enc_len;
 
     // number of symbols in encoded payload
-    div_t d = div(q->payload_bit_len, q->bits_per_symbol);
+    div_t d = div((int)q->payload_bit_len, (int)q->bits_per_symbol);
     q->payload_mod_len = d.quot + (d.rem ? 1 : 0);
 
     // soft demodulator uses one byte to represent each soft bit
     q->payload_enc = (unsigned char*) malloc(q->bits_per_symbol*q->payload_mod_len*sizeof(unsigned char));
 
     // set symbol length appropriately
-    q->payload_mod_len = q->payload_enc_len * q->bits_per_symbol;   // for QPSK
-    q->payload_mod = (unsigned char*) malloc(q->payload_mod_len*sizeof(unsigned char));
+    q->payload_mod_len = q->payload_enc_len * q->bits_per_symbol;    // for QPSK
+    q->payload_mod = (unsigned int*) malloc(q->payload_mod_len*sizeof(unsigned int));
+
+    q->n = 0;
 
     // return pointer to main object
     return q;
@@ -96,6 +99,8 @@ void qpacketmodem_destroy(qpacketmodem _q)
     // free arrays
     free(_q->payload_enc);
     free(_q->payload_mod);
+
+    free(_q);
 }
 
 // reset object
@@ -130,7 +135,7 @@ int qpacketmodem_configure(qpacketmodem _q,
     _q->payload_dec_len = _payload_len;
 
     // recreate modem object and get new bits per symbol
-    _q->mod_payload = modem_recreate(_q->mod_payload, _ms);
+    _q->mod_payload = modem_recreate(_q->mod_payload, (modulation_scheme)_ms);
     _q->bits_per_symbol = modem_get_bps(_q->mod_payload);
 
     // recreate packetizer object and compute new encoded payload length
@@ -141,7 +146,7 @@ int qpacketmodem_configure(qpacketmodem _q,
     _q->payload_bit_len = 8*_q->payload_enc_len;
 
     // number of symbols in encoded payload
-    div_t d = div(_q->payload_bit_len, _q->bits_per_symbol);
+    div_t d = div((int)_q->payload_bit_len, (int)_q->bits_per_symbol);
     _q->payload_mod_len = d.quot + (d.rem ? 1 : 0);
 
     // encoded payload array (leave room for soft-decision decoding)
@@ -149,8 +154,10 @@ int qpacketmodem_configure(qpacketmodem _q,
             _q->bits_per_symbol*_q->payload_mod_len*sizeof(unsigned char));
 
     // reallocate memory for modem symbols
-    _q->payload_mod = (unsigned char*) realloc(_q->payload_mod,
-                                               _q->payload_mod_len*sizeof(unsigned char));
+    _q->payload_mod = (unsigned int*) realloc(_q->payload_mod,
+                                              _q->payload_mod_len*sizeof(unsigned int));
+
+    _q->n = 0;
 
     return 0;
 }
@@ -188,27 +195,34 @@ unsigned int qpacketmodem_get_modscheme(qpacketmodem _q)
     return modem_get_scheme(_q->mod_payload);
 }
 
+float qpacketmodem_get_demodulator_phase_error(qpacketmodem _q)
+{
+    return modem_get_demodulator_phase_error(_q->mod_payload);
+}
+
+float qpacketmodem_get_demodulator_evm(qpacketmodem _q)
+{
+    return modem_get_demodulator_evm(_q->mod_payload);
+}
+
 // encode packet into un-modulated frame symbol indices
 //  _q          :   qpacketmodem object
 //  _payload    :   unencoded payload bytes
 //  _syms       :   encoded but un-modulated payload symbol indices
-void qpacketmodem_encode_syms(qpacketmodem          _q,
+void qpacketmodem_encode_syms(qpacketmodem    _q,
                               const unsigned char * _payload,
-                              unsigned char *       _syms)
+                              unsigned int * _syms)
 {
     // encode payload
     packetizer_encode(_q->p, _payload, _q->payload_enc);
 
-    // clear internal payload
-    memset(_q->payload_mod, 0x00, _q->payload_mod_len);
+    // clear payload
+    memset(_q->payload_mod, 0x00, _q->payload_mod_len * sizeof(unsigned int));
 
     // repack 8-bit payload bytes into 'bps'-bit payload symbols
     unsigned int bps = _q->bits_per_symbol;
-    unsigned int num_written;
-    liquid_repack_bytes(_q->payload_enc,  8,  _q->payload_enc_len,
-                        _syms,           bps, _q->payload_mod_len,
-                        &num_written);
-    assert(num_written == _q->payload_mod_len);
+    liquid_unpack_array_block(_q->payload_enc, _q->payload_enc_len,
+                              bps, _q->payload_mod_len, _syms);
 }
 
 // decode packet from demodulated frame symbol indices (hard-decision decoding)
@@ -216,16 +230,19 @@ void qpacketmodem_encode_syms(qpacketmodem          _q,
 //  _syms       :   received hard-decision symbol indices
 //  _payload    :   recovered decoded payload bytes
 int qpacketmodem_decode_syms(qpacketmodem    _q,
-                             unsigned char * _syms,
+                             unsigned int  * _syms,
                              unsigned char * _payload)
 {
     // pack bytes into payload array
     unsigned int bps = _q->bits_per_symbol;
-    unsigned int num_written;
-    liquid_repack_bytes(_syms,           bps, _q->payload_mod_len,
-                        _q->payload_enc,   8, _q->payload_mod_len, // NOTE: payload_enc allocation is actually payload_mod_len bytes
-                        &num_written);
-    //assert(num_written == _q->payload_enc_len); // NOTE: this will fail for bps in {3,5,6,7}
+    unsigned int i;
+    for (i=0; i<_q->payload_mod_len; i++) {
+        liquid_pack_array(_q->payload_enc,
+                          _q->payload_enc_len,
+                          i * bps,
+                          bps,
+                          _syms[i]);
+    }
 
     // decode payload
     return packetizer_decode(_q->p, _q->payload_enc, _payload);
@@ -250,7 +267,7 @@ int qpacketmodem_decode_bits(qpacketmodem    _q,
 //  _frame      :   encoded/modulated payload symbols
 void qpacketmodem_encode(qpacketmodem          _q,
                          const unsigned char * _payload,
-                         float complex *       _frame)
+                         liquid_float_complex *       _frame)
 {
     // encode payload symbols into internal buffer
     qpacketmodem_encode_syms(_q, _payload, _q->payload_mod);
@@ -266,7 +283,7 @@ void qpacketmodem_encode(qpacketmodem          _q,
 //  _frame      :   encoded/modulated payload symbols
 //  _payload    :   recovered decoded payload bytes
 int qpacketmodem_decode(qpacketmodem    _q,
-                        float complex * _frame,
+                        liquid_float_complex * _frame,
                         unsigned char * _payload)
 {
     unsigned int i;
@@ -295,7 +312,7 @@ int qpacketmodem_decode(qpacketmodem    _q,
 //  _frame      :   encoded/modulated payload symbols
 //  _payload    :   recovered decoded payload bytes
 int qpacketmodem_decode_soft(qpacketmodem    _q,
-                             float complex * _frame,
+                             liquid_float_complex * _frame,
                              unsigned char * _payload)
 {
     unsigned int i;
@@ -316,3 +333,22 @@ int qpacketmodem_decode_soft(qpacketmodem    _q,
     return packetizer_decode_soft(_q->p, _q->payload_enc, _payload);
 }
 
+// decode symbol from modulated frame samples, returning flag if all symbols received
+//  _q          :   qpacketmodem object
+//  _frame      :   encoded/modulated symbol
+int qpacketmodem_decode_soft_sym(qpacketmodem  _q,
+                                 liquid_float_complex _symbol)
+{
+    unsigned int sym;
+    modem_demodulate_soft(_q->mod_payload, _symbol, &sym, _q->payload_enc + _q->n);
+    _q->n += _q->bits_per_symbol;
+    return _q->n == _q->payload_mod_len * _q->bits_per_symbol;
+}
+
+int qpacketmodem_decode_soft_payload(qpacketmodem    _q,
+                                     unsigned char * _payload)
+{
+    assert( _q->n == _q->payload_mod_len * _q->bits_per_symbol);
+    _q->n = 0;
+    return packetizer_decode_soft(_q->p, _q->payload_enc, _payload);
+}

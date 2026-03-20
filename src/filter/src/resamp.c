@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007 - 2015 Joseph Gaeddert
+ * Copyright (c) 2007 - 2018 Joseph Gaeddert
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+
 
 // defined:
 //  TO          output data type
@@ -41,6 +41,11 @@
 
 // internal: update timing
 void RESAMP(_update_timing_state)(RESAMP() _q);
+
+enum state {
+    RESAMP_STATE_BOUNDARY, // boundary between input samples
+    RESAMP_STATE_INTERP,   // regular interpolation
+};
 
 struct RESAMP(_s) {
     // filter design parameters
@@ -64,10 +69,7 @@ struct RESAMP(_s) {
     unsigned int npfb;  // number of filters in the bank
     FIRPFB() f;         // filterbank object (interpolator)
 
-    enum {
-        RESAMP_STATE_BOUNDARY, // boundary between input samples
-        RESAMP_STATE_INTERP,   // regular interpolation
-    } state;
+    enum state state;
 };
 
 // create arbitrary resampler
@@ -89,14 +91,14 @@ RESAMP() RESAMP(_create)(float        _rate,
     } else if (_m == 0) {
         fprintf(stderr,"error: resamp_%s_create(), filter semi-length must be greater than zero\n", EXTENSION_FULL);
         exit(1);
-    } else if (_npfb == 0) {
-        fprintf(stderr,"error: resamp_%s_create(), number of filter banks must be greater than zero\n", EXTENSION_FULL);
-        exit(1);
     } else if (_fc <= 0.0f || _fc >= 0.5f) {
         fprintf(stderr,"error: resamp_%s_create(), filter cutoff must be in (0,0.5)\n", EXTENSION_FULL);
         exit(1);
     } else if (_As <= 0.0f) {
         fprintf(stderr,"error: resamp_%s_create(), filter stop-band suppression must be greater than zero\n", EXTENSION_FULL);
+        exit(1);
+    } else if (_npfb == 0) {
+        fprintf(stderr,"error: resamp_%s_create(), number of filter banks must be greater than zero\n", EXTENSION_FULL);
         exit(1);
     }
 
@@ -115,8 +117,8 @@ RESAMP() RESAMP(_create)(float        _rate,
 
     // design filter
     unsigned int n = 2*q->m*q->npfb+1;
-    float hf[n];
-    TC h[n];
+    float *hf = (float*) alloca(n*sizeof(float));
+    TC *h = (TC*) alloca(n*sizeof(TC));
     liquid_firdes_kaiser(n,q->fc/((float)(q->npfb)),q->As,0.0f,hf);
 
     // normalize filter coefficients by DC gain
@@ -152,7 +154,7 @@ RESAMP() RESAMP(_create_default)(float _rate)
 
     // det default parameters
     unsigned int m    = 7;
-    float        fc   = 0.25f;
+    float        fc   = 0.5f*_rate > 0.49f ? 0.49f : 0.5f*_rate;
     float        As   = 60.0f;
     unsigned int npfb = 64;
 
@@ -200,7 +202,9 @@ unsigned int RESAMP(_get_delay)(RESAMP() _q)
     return _q->m;
 }
 
-// set resampling rate
+// set rate of arbitrary resampler
+//  _q      : resampling object
+//  _rate   : new sampling rate, _rate > 0
 void RESAMP(_set_rate)(RESAMP() _q,
                        float    _rate)
 {
@@ -216,26 +220,60 @@ void RESAMP(_set_rate)(RESAMP() _q,
     _q->del = 1.0f / _q->rate;
 }
 
+// get rate of arbitrary resampler
+float RESAMP(_get_rate)(RESAMP() _q)
+{
+    return _q->rate;
+}
+
 // adjust resampling rate
 void RESAMP(_adjust_rate)(RESAMP() _q,
-                          float    _delta)
+                          float    _gamma)
 {
-    if (_delta > 0.1f || _delta < -0.1f) {
-        fprintf(stderr,"error: resamp_%s_adjust_rate(), resampling rate must be in [-0.1,0.1]\n", EXTENSION_FULL);
+    if (_gamma <= 0) {
+        fprintf(stderr,"error: resamp_%s_adjust_rate(), resampling adjustment (%12.4e) must be greater than zero\n", EXTENSION_FULL, _gamma);
         exit(1);
     }
 
     // adjust internal rate
-    _q->rate += _delta;
-
-    // clip rate
-    if (_q->rate >  0.5f) _q->rate =  0.5f;
-    if (_q->rate < -0.5f) _q->rate = -0.5f;
+    _q->rate *= _gamma;
 
     // set output stride
     _q->del = 1.0f / _q->rate;
 }
 
+
+// set resampling timing phase
+//  _q      : resampling object
+//  _tau    : sample timing
+void RESAMP(_set_timing_phase)(RESAMP() _q,
+                               float    _tau)
+{
+    if (_tau < -1.0f || _tau > 1.0f) {
+        fprintf(stderr,"error: resamp_%s_set_timing_phase(), timing phase must be in [-1,1], is %f\n.",
+                EXTENSION_FULL, _tau);
+        exit(1);
+    }
+
+    // set internal timing phase
+    _q->tau = _tau;
+}
+
+// adjust resampling timing phase
+//  _q      : resampling object
+//  _delta  : sample timing adjustment
+void RESAMP(_adjust_timing_phase)(RESAMP() _q,
+                                  float    _delta)
+{
+    if (_delta < -1.0f || _delta > 1.0f) {
+        fprintf(stderr,"error: resamp_%s_adjust_timing_phase(), timing phase adjustment must be in [-1,1], is %f\n.",
+                EXTENSION_FULL, _delta);
+        exit(1);
+    }
+
+    // adjust internal timing phase
+    _q->tau += _delta;
+}
 
 // run arbitrary resampler
 //  _q          :   resampling object
@@ -340,6 +378,117 @@ void RESAMP(_execute_block)(RESAMP()       _q,
 
     // set return value for number of output samples written
     *_ny = ny;
+}
+
+// execute arbitrary resampler into specified output size
+// will fill up to but not more than requested size _ny
+// returns true if more samples can be fetched without more inputs
+// false otherwise
+//  _q              :   resamp object
+//  _x              :   input buffer [size: _nx x 1]
+//  _nx             :   input buffer size
+//  _ux             :   number of input samples read
+//  _y              :   output sample array
+//  _ny             :   capacity of output sample array
+//  _uy             :   number of output samples written
+int RESAMP(_execute_output_block)(RESAMP() _q,
+                                  const TI * _x,
+                                  unsigned int _nx,
+                                  unsigned int * _ux,
+                                  TO * _y,
+                                  unsigned int _ny,
+                                  unsigned int * _uy)
+{
+
+    unsigned int num_read=0;
+    unsigned int num_written=0;
+    // loop through filling one output sample at a time
+    while (num_written < _ny) {
+        if (_q->b == 0 && _q->mu == 0) {
+            // very beginning of filter -- we need an input to get started
+            // this case seems strange, but we can't get here after things are moving
+            // if later we land exactly on _q->b = npfb and _q->mu = 0 then
+            //    we will get into the next, case, it will reset us to (0, 0),
+            //    but then immediately after we write a new output that put us
+            //    on some other b, mu
+            if (num_read == _nx) {
+                // ran out of input samples
+                break;
+            }
+            // push input sample into filterbank
+            FIRPFB(_push)(_q->f, _x[num_read]);
+            num_read++;
+        }
+        int done = 0;
+        while (_q->b >= _q->npfb) {
+            // we have stepped through the filter so we need a new input
+            if (num_read == _nx) {
+                // ran out of input samples
+                done = 1;
+                break;
+            }
+            // decrement timing phase by one sample
+            _q->tau -= 1.0f;
+            _q->bf  -= (float)(_q->npfb);
+            _q->b   -= _q->npfb;
+            // push input sample into filterbank
+            FIRPFB(_push)(_q->f, _x[num_read]);
+            num_read++;
+        }
+        if (done) {
+            break;
+        }
+
+        switch (_q->state) {
+        case RESAMP_STATE_BOUNDARY:
+            // compute filterbank output
+            FIRPFB(_execute)(_q->f, 0, &_q->y1);
+
+            // interpolate
+            _y[num_written++] = (1.0f - _q->mu)*_q->y0 + _q->mu*_q->y1;
+
+            // update timing state
+            RESAMP(_update_timing_state)(_q);
+
+            _q->state = RESAMP_STATE_INTERP;
+            break;
+
+        case RESAMP_STATE_INTERP:
+            // compute output at base index
+            FIRPFB(_execute)(_q->f, _q->b, &_q->y0);
+
+            // check to see if base index is last filter in the bank, in
+            // which case the resampler needs an additional input sample
+            // to finish the linear interpolation process
+            if (_q->b == _q->npfb-1) {
+                // last filter: need additional input sample
+                _q->state = RESAMP_STATE_BOUNDARY;
+
+                // set index to indicate new sample is needed
+                _q->b = _q->npfb;
+            } else {
+                // do not need additional input sample; compute
+                // output at incremented base index
+                FIRPFB(_execute)(_q->f, _q->b+1, &_q->y1);
+
+                // perform linear interpolation between filterbank outputs
+                _y[num_written++] = (1.0f - _q->mu)*_q->y0 + _q->mu*_q->y1;
+
+                // update timing state
+                RESAMP(_update_timing_state)(_q);
+            }
+            break;
+        default:
+            fprintf(stderr,"error: resamp_%s_execute(), invalid/unknown state\n", EXTENSION_FULL);
+            exit(1);
+        }
+    }
+
+    // specify number of samples used
+    *_ux = num_read;
+    *_uy = num_written;
+
+    return _q->b < _q->npfb;
 }
 
 

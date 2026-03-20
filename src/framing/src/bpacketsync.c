@@ -29,12 +29,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
+
 #include <assert.h>
 
 #include "liquid.internal.h"
 
 #define DEBUG_BPACKETSYNC   0
+
+enum state {
+    BPACKETSYNC_STATE_SEEKPN=0,     // seek p/n sequence
+    BPACKETSYNC_STATE_RXHEADER,     // receive header data
+    BPACKETSYNC_STATE_RXPAYLOAD     // receive payload data
+};
 
 // bpacketsync object structure
 struct bpacketsync_s {
@@ -73,11 +79,7 @@ struct bpacketsync_s {
     bsequence brx;          // binary received sequence
 
     // status variables
-    enum {
-        BPACKETSYNC_STATE_SEEKPN=0,     // seek p/n sequence
-        BPACKETSYNC_STATE_RXHEADER,     // receive header data
-        BPACKETSYNC_STATE_RXPAYLOAD     // receive payload data
-    } state;
+    enum state state;
 
     // counters
     unsigned int num_bytes_received;
@@ -188,7 +190,7 @@ void bpacketsync_print(bpacketsync _q)
 void bpacketsync_reset(bpacketsync _q)
 {
     // clear received sequence buffer
-    bsequence_clear(_q->brx);
+    bsequence_reset(_q->brx);
 
     // reset counters
     _q->num_bytes_received  = 0;

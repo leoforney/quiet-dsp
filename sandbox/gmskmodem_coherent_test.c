@@ -59,9 +59,9 @@ int main(int argc, char*argv[])
 
     // arrays
     unsigned int  sym_in [num_symbols];     // input symbols
-    float complex x      [num_samples];     // transmitted signal
-    float complex y      [num_samples];     // received signal
-    float complex z      [num_samples];     // received signal
+    liquid_float_complex x      [num_samples];     // transmitted signal
+    liquid_float_complex y      [num_samples];     // received signal
+    liquid_float_complex z      [num_samples];     // received signal
     unsigned int  sym_out[num_symbols];     // output symbols
 
     // create modem objects
@@ -98,9 +98,7 @@ int main(int argc, char*argv[])
     // compute power spectral density of transmitted signal
     unsigned int nfft = 1024;
     float psd[nfft];
-    spgramcf periodogram = spgramcf_create_kaiser(nfft, nfft/2, 8.0f);
-    spgramcf_estimate_psd(periodogram, x, num_samples, psd);
-    spgramcf_destroy(periodogram);
+    spgramcf_estimate_psd(nfft, x, num_samples, psd);
 
     // 
     // export results

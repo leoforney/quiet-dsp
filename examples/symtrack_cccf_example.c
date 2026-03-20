@@ -32,14 +32,13 @@ void usage()
     printf("  s     : signal-to-noise ratio,   default: 30 dB\n");
     printf("  w     : timing pll bandwidth,    default: 0.02\n");
     printf("  n     : number of symbols,       default: 4000\n");
-    printf("  t     : timing phase offset [%% symbol], t in [-0.5,0.5], default: -0.2\n");
 }
 
 int main(int argc, char*argv[])
 {
     // options
     int          ftype       = LIQUID_FIRFILT_ARKAISER;
-    int          ms          = LIQUID_MODEM_QPSK;
+    int          ms          = LIQUID_MODEM_QAM16;
     unsigned int k           = 2;       // samples per symbol
     unsigned int m           = 7;       // filter delay (symbols)
     float        beta        = 0.20f;   // filter excess bandwidth factor
@@ -47,17 +46,15 @@ int main(int argc, char*argv[])
     unsigned int hc_len      =   4;     // channel filter length
     float        noise_floor = -60.0f;  // noise floor [dB]
     float        SNRdB       = 30.0f;   // signal-to-noise ratio [dB]
-    float        bandwidth   =  0.02f;  // loop filter bandwidth
-    float        tau         = -0.2f;   // fractional symbol offset
-    float        rate        = 1.001f;  // sample rate offset
-    float        dphi        =  0.01f;  // carrier frequency offset [radians/sample]
+    float        bandwidth   =  0.10f;  // loop filter bandwidth
+    float        dphi        =  0.02f;  // carrier frequency offset [radians/sample]
     float        phi         =  2.1f;   // carrier phase offset [radians]
 
     unsigned int nfft        =   2400;  // spectral periodogram FFT size
     unsigned int num_samples = 200000;  // number of samples
 
     int dopt;
-    while ((dopt = getopt(argc,argv,"hk:m:b:s:w:n:t:r:")) != EOF) {
+    while ((dopt = getopt(argc,argv,"hk:m:b:s:w:n:")) != EOF) {
         switch (dopt) {
         case 'h':   usage();                        return 0;
         case 'k':   k           = atoi(optarg);     break;
@@ -66,8 +63,6 @@ int main(int argc, char*argv[])
         case 's':   SNRdB       = atof(optarg);     break;
         case 'w':   bandwidth   = atof(optarg);     break;
         case 'n':   num_symbols = atoi(optarg);     break;
-        case 't':   tau         = atof(optarg);     break;
-        case 'r':   rate        = atof(optarg);     break;
         default:
             exit(1);
         }
@@ -89,21 +84,15 @@ int main(int argc, char*argv[])
     } else if (num_symbols == 0) {
         fprintf(stderr,"error: number of symbols must be greater than 0\n");
         exit(1);
-    } else if (tau < -1.0f || tau > 1.0f) {
-        fprintf(stderr,"error: timing phase offset must be in [-1,1]\n");
-        exit(1);
-    } else if (rate > 1.02f || rate < 0.98f) {
-        fprintf(stderr,"error: timing rate offset must be in [1.02,0.98]\n");
-        exit(1);
     }
 
     unsigned int i;
 
     // buffers
-    unsigned int    buf_len = 400;      // buffer size
-    float complex   x   [buf_len];      // original signal
-    float complex   y   [buf_len*2];    // channel output (larger to accommodate resampler)
-    float complex   syms[buf_len];      // recovered symbols
+    unsigned int    buf_len = 800;      // buffer size
+    liquid_float_complex   x   [buf_len];      // original signal
+    liquid_float_complex   y   [buf_len];      // channel output
+    liquid_float_complex   syms[buf_len];      // recovered symbols
     // window for saving last few symbols
     windowcf sym_buf = windowcf_create(buf_len);
 
@@ -115,17 +104,15 @@ int main(int argc, char*argv[])
     channel_cccf_add_awgn          (channel, noise_floor, SNRdB);
     channel_cccf_add_carrier_offset(channel, dphi, phi);
     channel_cccf_add_multipath     (channel, NULL, hc_len);
-    channel_cccf_add_resamp        (channel, 0.0f, rate);
 
     // create symbol tracking synchronizer
     symtrack_cccf symtrack = symtrack_cccf_create(ftype,k,m,beta,ms);
-    symtrack_cccf_set_bandwidth(symtrack,0.05f);
+    symtrack_cccf_set_bandwidth(symtrack,bandwidth);
 
     // create spectral periodogram for estimating spectrum
     spgramcf periodogram = spgramcf_create_default(nfft);
 
     unsigned int total_samples = 0;
-    unsigned int ny;
     unsigned int total_symbols = 0;
     while (total_samples < num_samples)
     {
@@ -133,14 +120,14 @@ int main(int argc, char*argv[])
         symstreamcf_write_samples(gen, x, buf_len);
 
         // apply channel
-        channel_cccf_execute(channel, x, buf_len, y, &ny);
+        channel_cccf_execute_block(channel, x, buf_len, y);
 
         // push resulting sample through periodogram
-        spgramcf_write(periodogram, y, ny);
+        spgramcf_write(periodogram, y, buf_len);
 
         // run resulting stream through synchronizer
         unsigned int num_symbols_sync;
-        symtrack_cccf_execute_block(symtrack, y, ny, syms, &num_symbols_sync);
+        symtrack_cccf_execute_block(symtrack, y, buf_len, syms, &num_symbols_sync);
         total_symbols += num_symbols_sync;
 
         // write resulting symbols to window buffer for plotting
@@ -166,7 +153,7 @@ int main(int argc, char*argv[])
     fprintf(fid,"close all;\n");
 
     // read buffer and write last symbols to file
-    float complex * rc;
+    liquid_float_complex * rc;
     windowcf_read(sym_buf, &rc);
     fprintf(fid,"syms = zeros(1,%u);\n", buf_len);
     for (i=0; i<buf_len; i++)

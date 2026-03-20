@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007 - 2015 Joseph Gaeddert
+ * Copyright (c) 2007 - 2018 Joseph Gaeddert
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,8 +45,8 @@ void resamp2_crcf_bench(struct rusage *_start,
 
     resamp2_crcf q = resamp2_crcf_create(_m,0.0f,60.0f);
 
-    float complex x[] = {1.0f, -1.0f};
-    float complex y[] = {1.0f, -1.0f};
+    liquid_float_complex x[] = {1.0f, -1.0f};
+    liquid_float_complex y[] = {1.0f, -1.0f};
 
     // start trials
     getrusage(RUSAGE_SELF, _start);
@@ -84,16 +84,24 @@ void resamp2_crcf_bench(struct rusage *_start,
 //
 // Decimators
 //
-void benchmark_resamp2_crcf_decim_m2    RESAMP2_CRCF_BENCHMARK_API( 2,RESAMP2_DECIM)  // n=9
-void benchmark_resamp2_crcf_decim_m4    RESAMP2_CRCF_BENCHMARK_API( 4,RESAMP2_DECIM)  // n=17
-void benchmark_resamp2_crcf_decim_m8    RESAMP2_CRCF_BENCHMARK_API( 8,RESAMP2_DECIM)  // n=33
-void benchmark_resamp2_crcf_decim_m16   RESAMP2_CRCF_BENCHMARK_API(16,RESAMP2_DECIM)  // n=65
+void benchmark_resamp2_crcf_decim_m2    RESAMP2_CRCF_BENCHMARK_API(  2,RESAMP2_DECIM)
+void benchmark_resamp2_crcf_decim_m4    RESAMP2_CRCF_BENCHMARK_API(  4,RESAMP2_DECIM)
+void benchmark_resamp2_crcf_decim_m8    RESAMP2_CRCF_BENCHMARK_API(  8,RESAMP2_DECIM)
+void benchmark_resamp2_crcf_decim_m16   RESAMP2_CRCF_BENCHMARK_API( 16,RESAMP2_DECIM)
+void benchmark_resamp2_crcf_decim_m32   RESAMP2_CRCF_BENCHMARK_API( 32,RESAMP2_DECIM)
+void benchmark_resamp2_crcf_decim_m64   RESAMP2_CRCF_BENCHMARK_API( 64,RESAMP2_DECIM)
+void benchmark_resamp2_crcf_decim_m128  RESAMP2_CRCF_BENCHMARK_API(128,RESAMP2_DECIM)
+void benchmark_resamp2_crcf_decim_m256  RESAMP2_CRCF_BENCHMARK_API(256,RESAMP2_DECIM)
 
 // 
 // Interpolators
 //
-void benchmark_resamp2_crcf_interp_m2   RESAMP2_CRCF_BENCHMARK_API( 2,RESAMP2_INTERP) // n=9
-void benchmark_resamp2_crcf_interp_m4   RESAMP2_CRCF_BENCHMARK_API( 4,RESAMP2_INTERP) // n=17
-void benchmark_resamp2_crcf_interp_m8   RESAMP2_CRCF_BENCHMARK_API( 8,RESAMP2_INTERP) // n=33
-void benchmark_resamp2_crcf_interp_m16  RESAMP2_CRCF_BENCHMARK_API(16,RESAMP2_INTERP) // n=65
+void benchmark_resamp2_crcf_interp_m2   RESAMP2_CRCF_BENCHMARK_API(  2,RESAMP2_INTERP)
+void benchmark_resamp2_crcf_interp_m4   RESAMP2_CRCF_BENCHMARK_API(  4,RESAMP2_INTERP)
+void benchmark_resamp2_crcf_interp_m8   RESAMP2_CRCF_BENCHMARK_API(  8,RESAMP2_INTERP)
+void benchmark_resamp2_crcf_interp_m16  RESAMP2_CRCF_BENCHMARK_API( 16,RESAMP2_INTERP)
+void benchmark_resamp2_crcf_interp_m32  RESAMP2_CRCF_BENCHMARK_API( 32,RESAMP2_INTERP)
+void benchmark_resamp2_crcf_interp_m64  RESAMP2_CRCF_BENCHMARK_API( 64,RESAMP2_INTERP)
+void benchmark_resamp2_crcf_interp_m128 RESAMP2_CRCF_BENCHMARK_API(128,RESAMP2_INTERP)
+void benchmark_resamp2_crcf_interp_m256 RESAMP2_CRCF_BENCHMARK_API(256,RESAMP2_INTERP)
 

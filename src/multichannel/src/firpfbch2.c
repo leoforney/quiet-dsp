@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
+
 
 // firpfbch2 object structure definition
 struct FIRPFBCH2(_s) {
@@ -97,7 +97,7 @@ FIRPFBCH2() FIRPFBCH2(_create)(int          _type,
     unsigned int i;
     unsigned int n;
     unsigned int h_sub_len = 2 * q->m;
-    TC h_sub[h_sub_len];
+    TC *h_sub = (TC*) alloca(h_sub_len*sizeof(TC));
     for (i=0; i<q->M; i++) {
         // sub-sample prototype filter, loading coefficients
         // in reverse order
@@ -216,8 +216,8 @@ void FIRPFBCH2(_reset)(FIRPFBCH2() _q)
 
     // clear window buffers
     for (i=0; i<_q->M; i++) {
-        WINDOW(_clear)(_q->w0[i]);
-        WINDOW(_clear)(_q->w1[i]);
+        WINDOW(_reset)(_q->w0[i]);
+        WINDOW(_reset)(_q->w1[i]);
     }
 
     // reset filter/buffer alignment flag

@@ -64,9 +64,9 @@ int main(int argc, char*argv[]) {
     unsigned int num_samples = sequence_len*(n+2); // pad end w/ zeros
 
     // data arrays
-    float complex sequence[sequence_len];   // short sequence
-    float complex x[num_samples];           // autocorr input sequence
-    float complex rxx[num_samples];         // autocorr output
+    liquid_float_complex sequence[sequence_len];   // short sequence
+    liquid_float_complex x[num_samples];           // autocorr input sequence
+    liquid_float_complex rxx[num_samples];         // autocorr output
 
     // generate objects
     autocorr_cccf q = autocorr_cccf_create(window_size,delay);
@@ -83,7 +83,7 @@ int main(int argc, char*argv[]) {
     unsigned int t=0;
     for (i=0; i<n; i++) {
         // copy sequence
-        memmove(&x[t], sequence, sequence_len*sizeof(float complex));
+        memmove(&x[t], sequence, sequence_len*sizeof(liquid_float_complex));
 
         t += sequence_len;
     }
@@ -108,7 +108,7 @@ int main(int argc, char*argv[]) {
     }
 
     // find peak
-    float complex rxx_peak = 0;
+    liquid_float_complex rxx_peak = 0;
     for (i=0; i<num_samples; i++) {
         if (i==0 || cabsf(rxx[i]) > cabsf(rxx_peak))
             rxx_peak = rxx[i];
@@ -131,26 +131,20 @@ int main(int argc, char*argv[]) {
 
     // write signal to output file
     for (i=0; i<num_samples; i++) {
-        fprintf(fid,"x(%4u) = %12.4e + j*%12.4e;\n",i+1,crealf(x[i]),cimagf(x[i]));
-
+        fprintf(fid,"x  (%4u) = %12.4e + j*%12.4e;\n", i+1, crealf(x[i]  ), cimagf(x[i]  ));
         fprintf(fid,"rxx(%4u) = %12.4e + j*%12.4e;\n", i+1, crealf(rxx[i]), cimagf(rxx[i]));
     }
-
-    fprintf(fid,"\n\n");
     fprintf(fid,"t=1:num_samples;\n");
-    fprintf(fid,"figure;\n");
-    fprintf(fid,"plot(t,real(x),t,imag(x));\n");
-    fprintf(fid,"xlabel('sample index');\n");
-    fprintf(fid,"ylabel('received signal');\n");
-    fprintf(fid,"legend('real','imag',0);\n");
-
-    fprintf(fid,"\n\n");
-    fprintf(fid,"figure;\n");
-    fprintf(fid,"plot(t,abs(rxx));\n");
-    fprintf(fid,"xlabel('sample index');\n");
-    fprintf(fid,"ylabel('auto-correlation magnitude');\n");
-
-    fprintf(fid,"\n\n");
+    fprintf(fid,"figure('position',[100 100 800 600]);\n");
+    fprintf(fid,"subplot(2,1,1);\n");
+    fprintf(fid,"  plot(t,real(x),t,imag(x));\n");
+    fprintf(fid,"  xlabel('sample index');\n");
+    fprintf(fid,"  ylabel('received signal');\n");
+    fprintf(fid,"  legend('real','imag');\n");
+    fprintf(fid,"subplot(2,1,2);\n");
+    fprintf(fid,"  plot(t,abs(rxx));\n");
+    fprintf(fid,"  xlabel('sample index');\n");
+    fprintf(fid,"  ylabel('auto-correlation magnitude');\n");
     fclose(fid);
     printf("data written to %s\n", OUTPUT_FILENAME);
 

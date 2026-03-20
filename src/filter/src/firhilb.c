@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007 - 2015 Joseph Gaeddert
+ * Copyright (c) 2007 - 2018 Joseph Gaeddert
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>
+
 
 // defined:
 //  FIRHILB()       name-mangling macro
@@ -40,7 +40,7 @@
 
 struct FIRHILB(_s) {
     T * h;                  // filter coefficients
-    T complex * hc;         // filter coefficients (complex)
+    TC * hc;         // filter coefficients (complex)
     unsigned int h_len;     // length of filter
     float As;               // filter stop-band attenuation [dB]
 
@@ -81,7 +81,7 @@ FIRHILB() FIRHILB(_create)(unsigned int _m,
     // set filter length and allocate memory for coefficients
     q->h_len = 4*(q->m) + 1;
     q->h     = (T *)         malloc((q->h_len)*sizeof(T));
-    q->hc    = (T complex *) malloc((q->h_len)*sizeof(T complex));
+    q->hc    = (TC *) malloc((q->h_len)*sizeof(TC));
 
     // allocate memory for quadrature filter component
     q->hq_len = 2*(q->m);
@@ -94,7 +94,7 @@ FIRHILB() FIRHILB(_create)(unsigned int _m,
     unsigned int i;
     for (i=0; i<q->h_len; i++) {
         float t = (float)i - (float)(q->h_len-1)/2.0f;
-        q->hc[i] = q->h[i] * cexpf(_Complex_I*0.5f*M_PI*t);
+        q->hc[i] = q->h[i] * cexpf(_Complex_I*(T)(0.5f*M_PI*t));
         q->h[i]  = cimagf(q->hc[i]);
     }
 
@@ -106,8 +106,6 @@ FIRHILB() FIRHILB(_create)(unsigned int _m,
     // create windows for upper and lower polyphase filter branches
     q->w1 = WINDOW(_create)(2*(q->m));
     q->w0 = WINDOW(_create)(2*(q->m));
-    WINDOW(_clear)(q->w0);
-    WINDOW(_clear)(q->w1);
 
     // create internal dot product object
     q->dpq = DOTPROD(_create)(q->hq, q->hq_len);
@@ -158,8 +156,8 @@ void FIRHILB(_print)(FIRHILB() _q)
 void FIRHILB(_reset)(FIRHILB() _q)
 {
     // clear window buffers
-    WINDOW(_clear)(_q->w0);
-    WINDOW(_clear)(_q->w1);
+    WINDOW(_reset)(_q->w0);
+    WINDOW(_reset)(_q->w1);
 
     // reset toggle flag
     _q->toggle = 0;
@@ -171,7 +169,7 @@ void FIRHILB(_reset)(FIRHILB() _q)
 //  _y      :   complex-valued output sample
 void FIRHILB(_r2c_execute)(FIRHILB()   _q,
                            T           _x,
-                           T complex * _y)
+                           TC * _y)
 {
     T * r;  // buffer read pointer
     T yi;   // in-phase component
@@ -215,7 +213,7 @@ void FIRHILB(_r2c_execute)(FIRHILB()   _q,
 //  _y      :   complex-valued input sample
 //  _x      :   real-valued output sample
 void FIRHILB(_c2r_execute)(FIRHILB() _q,
-                           T complex _x,
+                           TC _x,
                            T *       _y)
 {
     *_y = crealf(_x);
@@ -227,7 +225,7 @@ void FIRHILB(_c2r_execute)(FIRHILB() _q,
 //  _y      :   complex-valued output sample
 void FIRHILB(_decim_execute)(FIRHILB()   _q,
                              T *         _x,
-                             T complex * _y)
+                             TC * _y)
 {
     T * r;  // buffer read pointer
     T yi;   // in-phase component
@@ -242,7 +240,11 @@ void FIRHILB(_decim_execute)(FIRHILB()   _q,
     WINDOW(_index)(_q->w0, _q->m-1, &yi);
 
     // set return value
-    *_y = yi + _Complex_I * yq;
+    TOC v = yi + _Complex_I * yq;
+    *_y = _q->toggle ? -v : v;
+
+    // toggle flag
+    _q->toggle = 1 - _q->toggle;
 }
 
 // execute Hilbert transform decimator (real to complex) on
@@ -254,7 +256,7 @@ void FIRHILB(_decim_execute)(FIRHILB()   _q,
 void FIRHILB(_decim_execute_block)(FIRHILB()    _q,
                                    T *          _x,
                                    unsigned int _n,
-                                   T complex *  _y)
+                                   TC *  _y)
 {
     unsigned int i;
 
@@ -267,20 +269,26 @@ void FIRHILB(_decim_execute_block)(FIRHILB()    _q,
 //  _y      :   complex-valued input sample
 //  _x      :   real-valued output array [size: 2 x 1]
 void FIRHILB(_interp_execute)(FIRHILB() _q,
-                              T complex _x,
+                              TC _x,
                               T *       _y)
 {
     T * r;  // buffer read pointer
 
     // TODO macro for crealf, cimagf?
-    
-    WINDOW(_push)(_q->w0, cimagf(_x));
+    T vi = _q->toggle ? -crealf(_x) : crealf(_x);
+    T vq = _q->toggle ? -cimagf(_x) : cimagf(_x);
+
+    // compute delay branch
+    WINDOW(_push)(_q->w0, vq);
     WINDOW(_index)(_q->w0, _q->m-1, &_y[0]);
 
     // compute second branch (filter)
-    WINDOW(_push)(_q->w1, crealf(_x));
+    WINDOW(_push)(_q->w1, vi);
     WINDOW(_read)(_q->w1, &r);
     DOTPROD(_execute)(_q->dpq, r, &_y[1]);
+
+    // toggle flag
+    _q->toggle = 1 - _q->toggle;
 }
 
 // execute Hilbert transform interpolator (complex to real)
@@ -290,7 +298,7 @@ void FIRHILB(_interp_execute)(FIRHILB() _q,
 //  _n      :   number of *input* samples
 //  _y      :   real-valued output array [size: 2*_n x 1]
 void FIRHILB(_interp_execute_block)(FIRHILB()    _q,
-                                    T complex *  _x,
+                                    TC *  _x,
                                     unsigned int _n,
                                     T *          _y)
 {

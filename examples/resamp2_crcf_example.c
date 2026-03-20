@@ -29,9 +29,9 @@ int main() {
     unsigned int n = num_samples + 2*m + 1; // adjusted input sequence length
 
     // allocate memory for data arrays
-    float complex x[  n];
-    float complex y[2*n];
-    float complex z[  n];
+    liquid_float_complex x[  n];
+    liquid_float_complex y[2*n];
+    liquid_float_complex z[  n];
 
     // generate the baseband signal (filter pulse)
     float h[num_samples];
@@ -49,7 +49,7 @@ int main() {
         resamp2_crcf_interp_execute(q, x[i], &y[2*i]);
 
     // clear resamp2 object
-    resamp2_crcf_clear(q);
+    resamp2_crcf_reset(q);
 
     // execute decimation stage
     for (i=0; i<n; i++)

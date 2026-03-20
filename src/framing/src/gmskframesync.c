@@ -27,8 +27,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
-#include <complex.h>
+
+
 #include <assert.h>
 
 #include "liquid.internal.h"
@@ -41,6 +41,10 @@
 // enable pre-demodulation filter (remove out-of-band noise)
 #define GMSKFRAMESYNC_PREFILTER         1
 
+// execute a single, post-filtered sample
+void gmskframesync_execute_sample(gmskframesync _q,
+                                  liquid_float_complex _x);
+
 // push buffered p/n sequence through synchronizer
 void gmskframesync_pushpn(gmskframesync _q);
 
@@ -49,7 +53,7 @@ void gmskframesync_syncpn(gmskframesync _q);
 
 // update instantaneous frequency estimate
 void gmskframesync_update_fi(gmskframesync _q,
-                             float complex _x);
+                             liquid_float_complex _x);
 
 // update symbol synchronizer internal state (filtered error, index, etc.)
 //  _q      :   frame synchronizer
@@ -60,13 +64,20 @@ int gmskframesync_update_symsync(gmskframesync _q,
                                  float *       _y);
 
 // execute stages
-void gmskframesync_execute_detectframe(gmskframesync _q, float complex _x);
-void gmskframesync_execute_rxpreamble( gmskframesync _q, float complex _x);
-void gmskframesync_execute_rxheader(   gmskframesync _q, float complex _x);
-void gmskframesync_execute_rxpayload(  gmskframesync _q, float complex _x);
+void gmskframesync_execute_detectframe(gmskframesync _q, liquid_float_complex _x);
+void gmskframesync_execute_rxpreamble( gmskframesync _q, liquid_float_complex _x);
+void gmskframesync_execute_rxheader(   gmskframesync _q, liquid_float_complex _x);
+void gmskframesync_execute_rxpayload(  gmskframesync _q, liquid_float_complex _x);
 
 // decode header
 void gmskframesync_decode_header(gmskframesync _q);
+
+enum state {
+    STATE_DETECTFRAME=0,        // detect frame (seek p/n sequence)
+    STATE_RXPREAMBLE,           // receive p/n sequence
+    STATE_RXHEADER,             // receive header data
+    STATE_RXPAYLOAD,            // receive payload data
+};
 
 // gmskframesync object structure
 struct gmskframesync_s {
@@ -81,7 +92,7 @@ struct gmskframesync_s {
     framesyncstats_s framestats;    // frame statistic object
     
     //
-    float complex x_prime;          // received sample state
+    liquid_float_complex x_prime;          // received sample state
     float fi_hat;                   // instantaneous frequency estimate
     
     // timing recovery objects, states
@@ -108,6 +119,9 @@ struct gmskframesync_s {
     float * preamble_rx;            // preamble p/n sequence (received)
 
     // header
+    unsigned int header_user_len;
+    unsigned int header_enc_len;
+    unsigned int header_mod_len;
     unsigned char * header_mod;
     unsigned char * header_enc;
     unsigned char * header_dec;
@@ -127,12 +141,7 @@ struct gmskframesync_s {
     int payload_valid;              // did payload pass crc?
     
     // status variables
-    enum {
-        STATE_DETECTFRAME=0,        // detect frame (seek p/n sequence)
-        STATE_RXPREAMBLE,           // receive p/n sequence
-        STATE_RXHEADER,             // receive header data
-        STATE_RXPAYLOAD,            // receive payload data
-    } state;
+    enum state state;
     unsigned int preamble_counter;  // counter: num of p/n syms received
     unsigned int header_counter;    // counter: num of header syms received
     unsigned int payload_counter;   // counter: num of payload syms received
@@ -171,7 +180,7 @@ gmskframesync gmskframesync_create(framesync_callback _callback,
     q->preamble_len = 63;
     q->preamble_pn = (float*)malloc(q->preamble_len*sizeof(float));
     q->preamble_rx = (float*)malloc(q->preamble_len*sizeof(float));
-    float complex preamble_samples[q->preamble_len*q->k];
+    liquid_float_complex *preamble_samples = (liquid_float_complex*) alloca((q->preamble_len*q->k)*sizeof(liquid_float_complex));
     msequence ms = msequence_create(6, 0x6d, 1);
     gmskmod mod = gmskmod_create(q->k, q->m, q->BT);
 
@@ -210,13 +219,11 @@ gmskframesync gmskframesync_create(framesync_callback _callback,
     q->nco_coarse = nco_crcf_create(LIQUID_NCO);
 
     // create/allocate header objects/arrays
-    q->header_mod = (unsigned char*)malloc(GMSKFRAME_H_SYM*sizeof(unsigned char));
-    q->header_enc = (unsigned char*)malloc(GMSKFRAME_H_ENC*sizeof(unsigned char));
-    q->header_dec = (unsigned char*)malloc(GMSKFRAME_H_DEC*sizeof(unsigned char));
-    q->p_header   = packetizer_create(GMSKFRAME_H_DEC,
-                                      GMSKFRAME_H_CRC,
-                                      GMSKFRAME_H_FEC,
-                                      LIQUID_FEC_NONE);
+    q->header_mod = NULL;
+    q->header_enc = NULL;
+    q->header_dec = NULL;
+    q->p_header = NULL;
+    gmskframesync_set_header_len(q, GMSKFRAME_H_USER_DEFAULT);
 
     // create/allocate payload objects/arrays
     q->payload_dec_len = 1;
@@ -297,6 +304,30 @@ void gmskframesync_print(gmskframesync _q)
     printf("gmskframesync:\n");
 }
 
+void gmskframesync_set_header_len(gmskframesync _q,
+                                  unsigned int _len)
+{
+
+    _q->header_user_len = _len;
+    unsigned int header_dec_len = GMSKFRAME_H_DEC + _q->header_user_len;
+    _q->header_dec = (unsigned char*)realloc(_q->header_dec, header_dec_len*sizeof(unsigned char));
+
+    if (_q->p_header) {
+        packetizer_destroy(_q->p_header);
+    }
+
+    _q->p_header = packetizer_create(header_dec_len,
+                                     GMSKFRAME_H_CRC,
+                                     GMSKFRAME_H_FEC,
+                                     LIQUID_FEC_NONE);
+
+    _q->header_enc_len = packetizer_get_enc_msg_len(_q->p_header);
+    _q->header_enc = (unsigned char*)realloc(_q->header_enc, _q->header_enc_len*sizeof(unsigned char));
+
+    _q->header_mod_len = _q->header_enc_len * 8;
+    _q->header_mod = (unsigned char*)realloc(_q->header_mod, _q->header_mod_len*sizeof(unsigned char));
+}
+
 // reset frame synchronizer object
 void gmskframesync_reset(gmskframesync _q)
 {
@@ -307,7 +338,7 @@ void gmskframesync_reset(gmskframesync _q)
     _q->payload_counter  = 0;
     
     // clear pre-demod buffer
-    windowcf_clear(_q->buffer);
+    windowcf_reset(_q->buffer);
 
     // reset internal objects
     detector_cccf_reset(_q->frame_detector);
@@ -326,18 +357,49 @@ void gmskframesync_reset(gmskframesync _q)
         
 }
 
+int gmskframesync_is_frame_open(gmskframesync _q)
+{
+    return (_q->state == STATE_DETECTFRAME) ? 0 : 1;
+}
+
+void gmskframesync_execute_sample(gmskframesync _q,
+                                  liquid_float_complex _x)
+{
+    switch (_q->state) {
+    case STATE_DETECTFRAME:
+        // look for p/n sequence
+        gmskframesync_execute_detectframe(_q, _x);
+        break;
+
+    case STATE_RXPREAMBLE:
+        // receive p/n sequence symbols
+        gmskframesync_execute_rxpreamble(_q, _x);
+        break;
+
+    case STATE_RXHEADER:
+        // receive header
+        gmskframesync_execute_rxheader(_q, _x);
+        break;
+
+    case STATE_RXPAYLOAD:
+        // receive payload
+        gmskframesync_execute_rxpayload(_q, _x);
+        break;
+    }
+}
+
 // execute frame synchronizer
 //  _q      :   frame synchronizer object
 //  _x      :   input sample array [size: _n x 1]
 //  _n      :   number of input samples
 void gmskframesync_execute(gmskframesync   _q,
-                           float complex * _x,
+                           liquid_float_complex * _x,
                            unsigned int    _n)
 {
     // push through synchronizer
     unsigned int i;
     for (i=0; i<_n; i++) {
-        float complex xf;   // input sample
+        liquid_float_complex xf;   // input sample
 #if GMSKFRAMESYNC_PREFILTER
         iirfilt_crcf_execute(_q->prefilter, _x[i], &xf);
 #else
@@ -349,27 +411,8 @@ void gmskframesync_execute(gmskframesync   _q,
             windowcf_push(_q->debug_x, xf);
 #endif
 
-        switch (_q->state) {
-        case STATE_DETECTFRAME:
-            // look for p/n sequence
-            gmskframesync_execute_detectframe(_q, xf);
-            break;
+        gmskframesync_execute_sample(_q, xf);
 
-        case STATE_RXPREAMBLE:
-            // receive p/n sequence symbols
-            gmskframesync_execute_rxpreamble(_q, xf);
-            break;
-
-        case STATE_RXHEADER:
-            // receive header
-            gmskframesync_execute_rxheader(_q, xf);
-            break;
-
-        case STATE_RXPAYLOAD:
-            // receive payload
-            gmskframesync_execute_rxpayload(_q, xf);
-            break;
-        }
     }
 }
 
@@ -462,7 +505,7 @@ void gmskframesync_pushpn(gmskframesync _q)
     firpfb_rrrf_reset(_q->dmf);
 
     // read buffer
-    float complex * rc;
+    liquid_float_complex * rc;
     windowcf_read(_q->buffer, &rc);
 
     // compute delay and filterbank index
@@ -483,27 +526,28 @@ void gmskframesync_pushpn(gmskframesync _q)
     nco_crcf_set_frequency(_q->nco_coarse, _q->dphi_hat);
     
     unsigned int buffer_len = (_q->preamble_len + _q->m) * _q->k;
-    for (i=0; i<buffer_len; i++) {
-        if (i < delay) {
-            float complex y;
-            nco_crcf_mix_down(_q->nco_coarse, rc[i], &y);
-            nco_crcf_step(_q->nco_coarse);
+    for (i=0; i<delay; i++) {
+        liquid_float_complex y;
+        nco_crcf_mix_down(_q->nco_coarse, rc[i], &y);
+        nco_crcf_step(_q->nco_coarse);
 
-            // update instantanenous frequency estimate
-            gmskframesync_update_fi(_q, y);
+        // update instantanenous frequency estimate
+        gmskframesync_update_fi(_q, y);
 
-            // push initial samples into filterbanks
-            firpfb_rrrf_push(_q->mf,  _q->fi_hat);
-            firpfb_rrrf_push(_q->dmf, _q->fi_hat);
-        } else {
-            // run remaining samples through p/n sequence recovery
-            gmskframesync_execute_rxpreamble(_q, rc[i]);
-        }
+        // push initial samples into filterbanks
+        firpfb_rrrf_push(_q->mf,  _q->fi_hat);
+        firpfb_rrrf_push(_q->dmf, _q->fi_hat);
     }
 
     // set state (still need a few more samples before entire p/n
     // sequence has been received)
     _q->state = STATE_RXPREAMBLE;
+
+    for (i=delay; i<buffer_len; i++) {
+        // run remaining samples through sample state machine
+        gmskframesync_execute_sample(_q, rc[i]);
+    }
+
 }
 
 // 
@@ -519,7 +563,7 @@ void gmskframesync_syncpn(gmskframesync _q)
 
 // update instantaneous frequency estimate
 void gmskframesync_update_fi(gmskframesync _q,
-                             float complex _x)
+                             liquid_float_complex _x)
 {
     // compute differential phase
     _q->fi_hat = cargf(conjf(_q->x_prime)*_x) * _q->k;
@@ -529,7 +573,7 @@ void gmskframesync_update_fi(gmskframesync _q,
 }
 
 void gmskframesync_execute_detectframe(gmskframesync _q,
-                                       float complex _x)
+                                       liquid_float_complex _x)
 {
     // push sample into pre-demod p/n sequence buffer
     windowcf_push(_q->buffer, _x);
@@ -553,7 +597,7 @@ void gmskframesync_execute_detectframe(gmskframesync _q,
 }
 
 void gmskframesync_execute_rxpreamble(gmskframesync _q,
-                                      float complex _x)
+                                      liquid_float_complex _x)
 {
     // validate input
     if (_q->preamble_counter == _q->preamble_len) {
@@ -562,7 +606,7 @@ void gmskframesync_execute_rxpreamble(gmskframesync _q,
     }
 
     // mix signal down
-    float complex y;
+    liquid_float_complex y;
     nco_crcf_mix_down(_q->nco_coarse, _x, &y);
     nco_crcf_step(_q->nco_coarse);
 
@@ -589,10 +633,10 @@ void gmskframesync_execute_rxpreamble(gmskframesync _q,
 }
 
 void gmskframesync_execute_rxheader(gmskframesync _q,
-                                    float complex _x)
+                                    liquid_float_complex _x)
 {
     // mix signal down
-    float complex y;
+    liquid_float_complex y;
     nco_crcf_mix_down(_q->nco_coarse, _x, &y);
     nco_crcf_step(_q->nco_coarse);
 
@@ -615,7 +659,7 @@ void gmskframesync_execute_rxheader(gmskframesync _q,
 
         // increment header counter
         _q->header_counter++;
-        if (_q->header_counter == GMSKFRAME_H_SYM) {
+        if (_q->header_counter == _q->header_mod_len) {
             // decode header
             gmskframesync_decode_header(_q);
 
@@ -657,10 +701,10 @@ void gmskframesync_execute_rxheader(gmskframesync _q,
 }
 
 void gmskframesync_execute_rxpayload(gmskframesync _q,
-                                     float complex _x)
+                                     liquid_float_complex _x)
 {
     // mix signal down
-    float complex y;
+    liquid_float_complex y;
     nco_crcf_mix_down(_q->nco_coarse, _x, &y);
     nco_crcf_step(_q->nco_coarse);
 
@@ -726,13 +770,13 @@ void gmskframesync_decode_header(gmskframesync _q)
 {
     // pack each 1-bit header symbols into 8-bit bytes
     unsigned int num_written;
-    liquid_pack_bytes(_q->header_mod, GMSKFRAME_H_SYM,
-                      _q->header_enc, GMSKFRAME_H_ENC,
+    liquid_pack_bytes(_q->header_mod, _q->header_mod_len,
+                      _q->header_enc, _q->header_enc_len,
                       &num_written);
-    assert(num_written==GMSKFRAME_H_ENC);
+    assert(num_written==_q->header_enc_len);
 
     // unscramble data
-    unscramble_data(_q->header_enc, GMSKFRAME_H_ENC);
+    unscramble_data(_q->header_enc, _q->header_enc_len);
 
     // run packet decoder
     _q->header_valid = packetizer_decode(_q->p_header, _q->header_enc, _q->header_dec);
@@ -744,7 +788,7 @@ void gmskframesync_decode_header(gmskframesync _q)
     if (!_q->header_valid)
         return;
 
-    unsigned int n = GMSKFRAME_H_USER;
+    unsigned int n = _q->header_user_len;
 
     // first byte is for expansion/version validation
     if (_q->header_dec[n+0] != GMSKFRAME_VERSION) {
@@ -794,9 +838,9 @@ void gmskframesync_decode_header(gmskframesync _q)
     if (_q->header_valid) {
         // set new packetizer properties
         _q->payload_dec_len = payload_dec_len;
-        _q->check           = check;
-        _q->fec0            = fec0;
-        _q->fec1            = fec1;
+        _q->check           = (crc_scheme)check;
+        _q->fec0            = (fec_scheme)fec0;
+        _q->fec1            = (fec_scheme)fec1;
         
         // recreate packetizer object
         _q->p_payload = packetizer_recreate(_q->p_payload,
@@ -869,7 +913,7 @@ void gmskframesync_debug_print(gmskframesync _q,
     fprintf(fid,"num_samples = %u;\n", DEBUG_GMSKFRAMESYNC_BUFFER_LEN);
     fprintf(fid,"t = 0:(num_samples-1);\n");
     unsigned int i;
-    float complex * rc;
+    liquid_float_complex * rc;
 
     // write x
     fprintf(fid,"x = zeros(1,num_samples);\n");

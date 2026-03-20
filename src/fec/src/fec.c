@@ -74,7 +74,7 @@ void liquid_print_fec_schemes()
     printf("          ");
     for (i=0; i<LIQUID_FEC_NUM_SCHEMES; i++) {
 #if !LIBFEC_ENABLED
-        if ( fec_scheme_is_convolutional(i) || fec_scheme_is_reedsolomon(i) )
+        if ( fec_scheme_is_convolutional((fec_scheme)i) || fec_scheme_is_reedsolomon((fec_scheme)i) )
             continue;
 #endif
         printf("%s", fec_scheme_str[i][0]);
@@ -98,7 +98,7 @@ fec_scheme liquid_getopt_str2fec(const char * _str)
     unsigned int i;
     for (i=0; i<LIQUID_FEC_NUM_SCHEMES; i++) {
         if (strcmp(_str,fec_scheme_str[i][0])==0) {
-            return i;
+            return (fec_scheme)i;
         }
     }
 
@@ -374,11 +374,11 @@ unsigned int fec_rs_get_enc_msg_len(unsigned int _dec_msg_len,
     div_t d;
 
     // compute the number of blocks in the full message sequence
-    d = div(_dec_msg_len, _kk);
+    d = div((int)_dec_msg_len, (int)_kk);
     unsigned int num_blocks = d.quot + (d.rem==0 ? 0 : 1);
 
     // compute the length of each decoded block
-    d = div(_dec_msg_len, num_blocks);
+    d = div((int)_dec_msg_len, (int)num_blocks);
     unsigned int dec_block_len = d.quot + (d.rem == 0 ? 0 : 1);
 
     // compute the encoded block length
@@ -587,7 +587,105 @@ fec fec_recreate(fec _q,
 // destroy fec object
 void fec_destroy(fec _q)
 {
-    free(_q);
+    switch (_q->scheme) {
+    case LIQUID_FEC_UNKNOWN:
+        printf("error: fec_destroy(), cannot destroy fec object of type \"UNKNOWN\"\n");
+        exit(-1);
+    case LIQUID_FEC_NONE:
+        fec_pass_destroy(_q);
+        return;
+    case LIQUID_FEC_REP3:
+        fec_rep3_destroy(_q);
+        return;
+    case LIQUID_FEC_REP5:
+        fec_rep5_destroy(_q);
+        return;
+    case LIQUID_FEC_HAMMING74:
+        fec_hamming74_destroy(_q);
+        return;
+    case LIQUID_FEC_HAMMING84:
+        fec_hamming84_destroy(_q);
+        return;
+    case LIQUID_FEC_HAMMING128:
+        fec_hamming128_destroy(_q);
+        return;
+
+    case LIQUID_FEC_GOLAY2412:
+        fec_golay2412_destroy(_q);
+        return;
+
+    // SEC-DED codecs (single error correction, double error detection)
+    case LIQUID_FEC_SECDED2216:
+        fec_secded2216_destroy(_q);
+        return;
+    case LIQUID_FEC_SECDED3932:
+        fec_secded3932_destroy(_q);
+        return;
+    case LIQUID_FEC_SECDED7264:
+        fec_secded7264_destroy(_q);
+        return;
+
+    // convolutional codes
+#if LIBFEC_ENABLED
+    case LIQUID_FEC_CONV_V27:
+    case LIQUID_FEC_CONV_V29:
+    case LIQUID_FEC_CONV_V39:
+    case LIQUID_FEC_CONV_V615:
+        fec_conv_destroy(_q);
+        return;
+
+    // punctured
+    case LIQUID_FEC_CONV_V27P23:
+    case LIQUID_FEC_CONV_V27P34:
+    case LIQUID_FEC_CONV_V27P45:
+    case LIQUID_FEC_CONV_V27P56:
+    case LIQUID_FEC_CONV_V27P67:
+    case LIQUID_FEC_CONV_V27P78:
+
+    case LIQUID_FEC_CONV_V29P23:
+    case LIQUID_FEC_CONV_V29P34:
+    case LIQUID_FEC_CONV_V29P45:
+    case LIQUID_FEC_CONV_V29P56:
+    case LIQUID_FEC_CONV_V29P67:
+    case LIQUID_FEC_CONV_V29P78:
+        fec_conv_punctured_destroy(_q);
+        return;
+
+    // Reed-Solomon codes
+    case LIQUID_FEC_RS_M8:
+        fec_rs_destroy(_q);
+        return;
+#else
+    case LIQUID_FEC_CONV_V27:
+    case LIQUID_FEC_CONV_V29:
+    case LIQUID_FEC_CONV_V39:
+    case LIQUID_FEC_CONV_V615:
+
+    case LIQUID_FEC_CONV_V27P23:
+    case LIQUID_FEC_CONV_V27P34:
+    case LIQUID_FEC_CONV_V27P45:
+    case LIQUID_FEC_CONV_V27P56:
+    case LIQUID_FEC_CONV_V27P67:
+    case LIQUID_FEC_CONV_V27P78:
+
+    case LIQUID_FEC_CONV_V29P23:
+    case LIQUID_FEC_CONV_V29P34:
+    case LIQUID_FEC_CONV_V29P45:
+    case LIQUID_FEC_CONV_V29P56:
+    case LIQUID_FEC_CONV_V29P67:
+    case LIQUID_FEC_CONV_V29P78:
+        fprintf(stderr,"error: fec_destroy(), convolutional codes unavailable (install libfec)\n");
+        exit(-1);
+
+    case LIQUID_FEC_RS_M8:
+        fprintf(stderr,"error: fec_destroy(), Reed-Solomon codes unavailable (install libfec)\n");
+        exit(-1);
+#endif
+
+    default:
+        printf("error: fec_destroy(), unknown/unsupported scheme: %d\n", _q->scheme);
+        exit(-1);
+    }
 }
 
 // print basic fec object internals
@@ -642,7 +740,7 @@ void fec_decode_soft(fec _q,
     } else {
         // pack bytes and use hard-decision decoding
         unsigned enc_msg_len = fec_get_enc_msg_length(_q->scheme, _dec_msg_len);
-        unsigned char msg_enc_hard[enc_msg_len];
+        unsigned char *msg_enc_hard = (unsigned char*) alloca(enc_msg_len*sizeof(unsigned char));
         unsigned int i;
         for (i=0; i<enc_msg_len; i++) {
             // TODO : use pack bytes

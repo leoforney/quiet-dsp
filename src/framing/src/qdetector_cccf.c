@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
+
 #include <assert.h>
 
 #include "liquid.internal.h"
@@ -38,23 +38,28 @@
 
 // seek signal (initial detection)
 void qdetector_cccf_execute_seek(qdetector_cccf _q,
-                                 float complex  _x);
+                                 liquid_float_complex  _x);
 
 // align signal in time, compute offset estimates
 void qdetector_cccf_execute_align(qdetector_cccf _q,
-                                  float complex  _x);
+                                  liquid_float_complex  _x);
+
+enum state {
+    QDETECTOR_STATE_SEEK,       // seek sequence
+    QDETECTOR_STATE_ALIGN,      // align sequence
+};
 
 // main object definition
 struct qdetector_cccf_s {
     unsigned int    s_len;          // template (time) length: k * (sequence_len + 2*m)
-    float complex * s;              // template (time), [size: s_len x 1]
-    float complex * S;              // template (freq), [size: nfft x 1]
+    liquid_float_complex * s;              // template (time), [size: s_len x 1]
+    liquid_float_complex * S;              // template (freq), [size: nfft x 1]
     float           s2_sum;         // sum{ s^2 }
 
-    float complex * buf_time_0;     // time-domain buffer (FFT)
-    float complex * buf_freq_0;     // frequence-domain buffer (FFT)
-    float complex * buf_freq_1;     // frequence-domain buffer (IFFT)
-    float complex * buf_time_1;     // time-domain buffer (IFFT)
+    liquid_float_complex * buf_time_0;     // time-domain buffer (FFT)
+    liquid_float_complex * buf_freq_0;     // frequence-domain buffer (FFT)
+    liquid_float_complex * buf_freq_1;     // frequence-domain buffer (IFFT)
+    liquid_float_complex * buf_time_1;     // time-domain buffer (IFFT)
     unsigned int    nfft;           // fft size
     fftplan         fft;            // FFT object:  buf_time_0 > buf_freq_0
     fftplan         ifft;           // IFFT object: buf_freq_1 > buf_freq_1
@@ -67,23 +72,21 @@ struct qdetector_cccf_s {
     float           x2_sum_0;       // sum{ |x|^2 } of first half of buffer
     float           x2_sum_1;       // sum{ |x|^2 } of second half of buffer
 
+    float           rxy;            // peak correlation output
     int             offset;         // FFT offset index for peak correlation (coarse carrier estimate)
     float           tau_hat;        // timing offset estimate
     float           gamma_hat;      // signal level estimate (channel gain)
     float           dphi_hat;       // carrier frequency offset estimate
     float           phi_hat;        // carrier phase offset estimate
 
-    enum {
-        QDETECTOR_STATE_SEEK,       // seek sequence
-        QDETECTOR_STATE_ALIGN,      // align sequence
-    }               state;          // execution state
+    enum state      state;          // execution state
     int             frame_detected; // frame detected?
 };
 
 // create detector with generic sequence
 //  _s      :   sample sequence
 //  _s_len  :   length of sample sequence
-qdetector_cccf qdetector_cccf_create(float complex * _s,
+qdetector_cccf qdetector_cccf_create(liquid_float_complex * _s,
                                      unsigned int    _s_len)
 {
     // validate input
@@ -97,26 +100,26 @@ qdetector_cccf qdetector_cccf_create(float complex * _s,
     q->s_len = _s_len;
 
     // allocate memory and copy sequence
-    q->s = (float complex*) malloc(q->s_len * sizeof(float complex));
-    memmove(q->s, _s, q->s_len*sizeof(float complex));
+    q->s = (liquid_float_complex*) malloc(q->s_len * sizeof(liquid_float_complex));
+    memmove(q->s, _s, q->s_len*sizeof(liquid_float_complex));
     q->s2_sum = liquid_sumsqcf(q->s, q->s_len); // compute sum{ s^2 }
 
     // prepare transforms
     q->nfft       = 1 << liquid_nextpow2( (unsigned int)( 2 * q->s_len ) ); // NOTE: must be even
-    q->buf_time_0 = (float complex*) malloc(q->nfft * sizeof(float complex));
-    q->buf_freq_0 = (float complex*) malloc(q->nfft * sizeof(float complex));
-    q->buf_freq_1 = (float complex*) malloc(q->nfft * sizeof(float complex));
-    q->buf_time_1 = (float complex*) malloc(q->nfft * sizeof(float complex));
+    q->buf_time_0 = (liquid_float_complex*) malloc(q->nfft * sizeof(liquid_float_complex));
+    q->buf_freq_0 = (liquid_float_complex*) malloc(q->nfft * sizeof(liquid_float_complex));
+    q->buf_freq_1 = (liquid_float_complex*) malloc(q->nfft * sizeof(liquid_float_complex));
+    q->buf_time_1 = (liquid_float_complex*) malloc(q->nfft * sizeof(liquid_float_complex));
 
     q->fft  = fft_create_plan(q->nfft, q->buf_time_0, q->buf_freq_0, LIQUID_FFT_FORWARD,  0);
     q->ifft = fft_create_plan(q->nfft, q->buf_freq_1, q->buf_time_1, LIQUID_FFT_BACKWARD, 0);
 
     // create frequency-domain template by taking nfft-point transform on 's', storing in 'S'
-    q->S = (float complex*) malloc(q->nfft * sizeof(float complex));
-    memset(q->buf_time_0, 0x00, q->nfft*sizeof(float complex));
-    memmove(q->buf_time_0, q->s, q->s_len*sizeof(float complex));
+    q->S = (liquid_float_complex*) malloc(q->nfft * sizeof(liquid_float_complex));
+    memset(q->buf_time_0, 0x00, q->nfft*sizeof(liquid_float_complex));
+    memmove(q->buf_time_0, q->s, q->s_len*sizeof(liquid_float_complex));
     fft_execute(q->fft);
-    memmove(q->S, q->buf_freq_0, q->nfft*sizeof(float complex));
+    memmove(q->S, q->buf_freq_0, q->nfft*sizeof(liquid_float_complex));
 
     // reset state variables
     q->counter        = q->nfft/2;
@@ -125,9 +128,10 @@ qdetector_cccf qdetector_cccf_create(float complex * _s,
     q->x2_sum_1       = 0.0f;
     q->state          = QDETECTOR_STATE_SEEK;
     q->frame_detected = 0;
-    memset(q->buf_time_0, 0x00, q->nfft*sizeof(float complex));
+    memset(q->buf_time_0, 0x00, q->nfft*sizeof(liquid_float_complex));
     
     // reset estimates
+    q->rxy       = 0.0f;
     q->tau_hat   = 0.0f;
     q->gamma_hat = 0.0f;
     q->dphi_hat  = 0.0f;
@@ -148,7 +152,7 @@ qdetector_cccf qdetector_cccf_create(float complex * _s,
 //  _k              :   samples/symbol
 //  _m              :   filter delay
 //  _beta           :   excess bandwidth factor
-qdetector_cccf qdetector_cccf_create_linear(float complex * _sequence,
+qdetector_cccf qdetector_cccf_create_linear(liquid_float_complex * _sequence,
                                             unsigned int    _sequence_len,
                                             int             _ftype,
                                             unsigned int    _k,
@@ -172,7 +176,7 @@ qdetector_cccf qdetector_cccf_create_linear(float complex * _sequence,
     
     // create time-domain template
     unsigned int    s_len = _k * (_sequence_len + 2*_m);
-    float complex * s     = (float complex*) malloc(s_len * sizeof(float complex));
+    liquid_float_complex * s     = (liquid_float_complex*) malloc(s_len * sizeof(liquid_float_complex));
     firinterp_crcf interp = firinterp_crcf_create_prototype(_ftype, _k, _m, _beta, 0);
     unsigned int i;
     for (i=0; i<_sequence_len + 2*_m; i++)
@@ -218,7 +222,7 @@ qdetector_cccf qdetector_cccf_create_gmsk(unsigned char * _sequence,
     
     // create time-domain template using GMSK modem
     unsigned int    s_len = _k * (_sequence_len + 2*_m);
-    float complex * s     = (float complex*) malloc(s_len * sizeof(float complex));
+    liquid_float_complex * s     = (liquid_float_complex*) malloc(s_len * sizeof(liquid_float_complex));
     gmskmod mod = gmskmod_create(_k, _m, _beta);
     unsigned int i;
     for (i=0; i<_sequence_len + 2*_m; i++)
@@ -258,6 +262,7 @@ void qdetector_cccf_print(qdetector_cccf _q)
     printf("qdetector_cccf:\n");
     printf("  template length (time):   %-u\n",   _q->s_len);
     printf("  FFT size              :   %-u\n",   _q->nfft);
+    printf("  search range (bins)   :   %-d\n",   _q->range);
     printf("  detection threshold   :   %6.4f\n", _q->threshold);
     printf("  sum{ s^2 }            :   %.2f\n",  _q->s2_sum);
 }
@@ -267,7 +272,7 @@ void qdetector_cccf_reset(qdetector_cccf _q)
 }
 
 void * qdetector_cccf_execute(qdetector_cccf _q,
-                              float complex  _x)
+                              liquid_float_complex  _x)
 {
     switch (_q->state) {
     case QDETECTOR_STATE_SEEK:
@@ -340,6 +345,12 @@ unsigned int qdetector_cccf_get_buf_len(qdetector_cccf _q)
     return _q->nfft;
 }
 
+// correlator output
+float qdetector_cccf_get_rxy(qdetector_cccf _q)
+{
+    return _q->rxy;
+}
+
 // fractional timing offset estimate
 float qdetector_cccf_get_tau(qdetector_cccf _q)
 {
@@ -371,7 +382,7 @@ float qdetector_cccf_get_phi(qdetector_cccf _q)
 
 // seek signal (initial detection)
 void qdetector_cccf_execute_seek(qdetector_cccf _q,
-                                 float complex  _x)
+                                 liquid_float_complex  _x)
 {
     // write sample to buffer and increment counter
     _q->buf_time_0[_q->counter++] = _x;
@@ -389,8 +400,23 @@ void qdetector_cccf_execute_seek(qdetector_cccf _q,
     fft_execute(_q->fft);
 
     // compute scaling factor (TODO: use median rather than mean signal level)
-    float g0 = sqrtf(_q->x2_sum_0 + _q->x2_sum_1) * sqrtf((float)(_q->s_len) / (float)(_q->nfft));
-    float g = 1.0f / ( (float)(_q->nfft) * g0 * sqrtf(_q->s2_sum) );
+    float g0;
+    if (_q->x2_sum_0 == 0.f) {
+        g0 = sqrtf(_q->x2_sum_1) * sqrtf((float)(_q->s_len) / (float)(_q->nfft / 2));
+    } else {
+        g0 = sqrtf(_q->x2_sum_0 + _q->x2_sum_1) * sqrtf((float)(_q->s_len) / (float)(_q->nfft));
+    }
+    if (g0 < 1e-10) {
+        memmove(_q->buf_time_0,
+                _q->buf_time_0 + _q->nfft / 2,
+                (_q->nfft / 2) * sizeof(liquid_float_complex));
+
+        // swap accumulated signal levels
+        _q->x2_sum_0 = _q->x2_sum_1;
+        _q->x2_sum_1 = 0.0f;
+        return;
+    }
+    float g = 1.0f / ((float)(_q->nfft) * g0 * sqrtf(_q->s2_sum));
     
     // sweep over carrier frequency offset range
     int offset;
@@ -456,10 +482,11 @@ void qdetector_cccf_execute_seek(qdetector_cccf _q,
         // update state, reset counter, copy buffer appropriately
         _q->state = QDETECTOR_STATE_ALIGN;
         _q->offset = rxy_offset;
+        _q->rxy    = rxy_peak; // note that this is a coarse estimate
         // TODO: check for edge case where rxy_index is zero (signal already aligned)
 
         // copy last part of fft input buffer to front
-        memmove(_q->buf_time_0, _q->buf_time_0 + rxy_index, (_q->nfft - rxy_index)*sizeof(float complex));
+        memmove(_q->buf_time_0, _q->buf_time_0 + rxy_index, (_q->nfft - rxy_index)*sizeof(liquid_float_complex));
         _q->counter = _q->nfft - rxy_index;
 
         return;
@@ -469,7 +496,7 @@ void qdetector_cccf_execute_seek(qdetector_cccf _q,
 #endif
     
     // copy last half of fft input buffer to front
-    memmove(_q->buf_time_0, _q->buf_time_0 + _q->nfft/2, (_q->nfft/2)*sizeof(float complex));
+    memmove(_q->buf_time_0, _q->buf_time_0 + _q->nfft/2, (_q->nfft/2)*sizeof(liquid_float_complex));
 
     // swap accumulated signal levels
     _q->x2_sum_0 = _q->x2_sum_1;
@@ -478,7 +505,7 @@ void qdetector_cccf_execute_seek(qdetector_cccf _q,
 
 // align signal in time, compute offset estimates
 void qdetector_cccf_execute_align(qdetector_cccf _q,
-                                  float complex  _x)
+                                  liquid_float_complex  _x)
 {
     // write sample to buffer and increment counter
     _q->buf_time_0[_q->counter++] = _x;
@@ -512,9 +539,10 @@ void qdetector_cccf_execute_align(qdetector_cccf _q,
     _q->tau_hat = -b / (2.0f*a); //-0.5f*(ypos - yneg) / (ypos + yneg - 2*y0);
     float g_hat   = (a*_q->tau_hat*_q->tau_hat + b*_q->tau_hat + c);
     _q->gamma_hat = g_hat * g_hat / ((float)(_q->nfft) * _q->s2_sum); // g_hat^2 because of sqrt for yneg/y0/ypos
+    // TODO: revise estimate of rxy here
 
     // copy buffer to preserve data integrity
-    memmove(_q->buf_time_1, _q->buf_time_0, _q->nfft*sizeof(float complex));
+    memmove(_q->buf_time_1, _q->buf_time_0, _q->nfft*sizeof(liquid_float_complex));
 
     // estimate carrier frequency offset
     for (i=0; i<_q->nfft; i++)
@@ -573,9 +601,9 @@ void qdetector_cccf_execute_align(qdetector_cccf _q,
     // METHOD 2: compute metric by de-rotating signal and measuring resulting phase
     // NOTE: this is possibly more accurate than the above method but might also
     //       be more computationally complex
-    float complex metric = 0;
+    liquid_float_complex metric = 0;
     for (i=0; i<_q->s_len; i++)
-        metric += _q->buf_time_0[i] * cexpf(-_Complex_I*_q->dphi_hat*i);
+        metric += _q->buf_time_0[i] * cexpf(-_Complex_I*(float)(_q->dphi_hat*i));
     //printf("metric : %12.8f <%12.8f>\n", cabsf(metric), cargf(metric));
     _q->phi_hat = cargf(metric);
 #endif
@@ -599,7 +627,7 @@ void qdetector_cccf_execute_align(qdetector_cccf _q,
 
     // reset state
     // copy saved buffer state (last half of buf_time_1 to front half of buf_time_0)
-    memmove(_q->buf_time_0, _q->buf_time_1 + _q->nfft/2, (_q->nfft/2)*sizeof(float complex));
+    memmove(_q->buf_time_0, _q->buf_time_1 + _q->nfft/2, (_q->nfft/2)*sizeof(liquid_float_complex));
     _q->state = QDETECTOR_STATE_SEEK;
     _q->x2_sum_0 = liquid_sumsqcf(_q->buf_time_0, _q->nfft/2);
     _q->x2_sum_1 = 0;

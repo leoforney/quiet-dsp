@@ -35,8 +35,8 @@ int main(int argc, char*argv[])
     float nstd = powf(10.0f, noise_floor / 20.0f);
 
     // arrays
-    float complex x[num_samples];
-    float complex y[num_samples];
+    liquid_float_complex x[num_samples];
+    liquid_float_complex y[num_samples];
     float rssi[num_samples];
 
     // create objects
@@ -51,7 +51,7 @@ int main(int argc, char*argv[])
     printf("automatic gain control // loop bandwidth: %4.2e\n",bt);
 
     unsigned int sym;
-    float complex s;
+    liquid_float_complex s;
     for (i=0; i<num_symbols; i++) {
         // generate random symbol
         sym = modem_gen_rand_sym(mod);
@@ -96,29 +96,25 @@ int main(int argc, char*argv[])
     fprintf(fid,"n = %u;\n", num_samples);
     fprintf(fid,"clear all;\n");
     fprintf(fid,"close all;\n\n");
-
-    // print results
     for (i=0; i<num_samples; i++) {
         fprintf(fid,"   x(%4u) = %12.4e + j*%12.4e;\n", i+1, crealf(x[i]), cimagf(x[i]));
         fprintf(fid,"   y(%4u) = %12.4e + j*%12.4e;\n", i+1, crealf(y[i]), cimagf(y[i]));
         fprintf(fid,"rssi(%4u) = %12.4e;\n", i+1, rssi[i]);
     }
-
-
     fprintf(fid,"\n\n");
     fprintf(fid,"n = length(x);\n");
     fprintf(fid,"t = 0:(n-1);\n");
-    fprintf(fid,"figure;\n");
-    fprintf(fid,"plot(t,rssi,'-k','LineWidth',2);\n");
-    fprintf(fid,"xlabel('sample index');\n");
-    fprintf(fid,"ylabel('rssi [dB]');\n");
-    fprintf(fid,"grid on;\n");
-    fprintf(fid,"\n\n");
-    fprintf(fid,"figure;\n");
-    fprintf(fid,"plot(t,real(y),t,imag(y));\n");
-    fprintf(fid,"xlabel('sample index');\n");
-    fprintf(fid,"ylabel('agc output');\n");
-    fprintf(fid,"grid on;\n");
+    fprintf(fid,"figure('position',[100 100 800 600]);\n");
+    fprintf(fid,"subplot(2,1,1);\n");
+    fprintf(fid,"  plot(t,rssi,'-k','LineWidth',2);\n");
+    fprintf(fid,"  xlabel('sample index');\n");
+    fprintf(fid,"  ylabel('rssi [dB]');\n");
+    fprintf(fid,"  grid on;\n");
+    fprintf(fid,"subplot(2,1,2);\n");
+    fprintf(fid,"  plot(t,real(y),t,imag(y));\n");
+    fprintf(fid,"  xlabel('sample index');\n");
+    fprintf(fid,"  ylabel('agc output');\n");
+    fprintf(fid,"  grid on;\n");
     fclose(fid);
     printf("results written to %s\n", OUTPUT_FILENAME);
 

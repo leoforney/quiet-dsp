@@ -68,13 +68,21 @@ const struct modulation_type_s modulation_types[LIQUID_MODEM_NUM_SCHEMES] = {
     {"ask256",    "amplitude-shift keying (256)", LIQUID_MODEM_ASK256, 8},
 
     // quadrature amplitude-shift keying
-    {"qam4",      "quadrature amplitude-shift keying (4)",   LIQUID_MODEM_QAM4,   2},
-    {"qam8",      "quadrature amplitude-shift keying (8)",   LIQUID_MODEM_QAM8,   3},
-    {"qam16",     "quadrature amplitude-shift keying (16)",  LIQUID_MODEM_QAM16,  4},
-    {"qam32",     "quadrature amplitude-shift keying (32)",  LIQUID_MODEM_QAM32,  5},
-    {"qam64",     "quadrature amplitude-shift keying (64)",  LIQUID_MODEM_QAM64,  6},
-    {"qam128",    "quadrature amplitude-shift keying (128)", LIQUID_MODEM_QAM128, 7},
-    {"qam256",    "quadrature amplitude-shift keying (256)", LIQUID_MODEM_QAM256, 8},
+    {"qam4",      "quadrature amplitude-shift keying (4)",     LIQUID_MODEM_QAM4,   2},
+    {"qam8",      "quadrature amplitude-shift keying (8)",     LIQUID_MODEM_QAM8,   3},
+    {"qam16",     "quadrature amplitude-shift keying (16)",    LIQUID_MODEM_QAM16,  4},
+    {"qam32",     "quadrature amplitude-shift keying (32)",    LIQUID_MODEM_QAM32,  5},
+    {"qam64",     "quadrature amplitude-shift keying (64)",    LIQUID_MODEM_QAM64,  6},
+    {"qam128",    "quadrature amplitude-shift keying (128)",   LIQUID_MODEM_QAM128, 7},
+    {"qam256",    "quadrature amplitude-shift keying (256)",   LIQUID_MODEM_QAM256, 8},
+    {"qam512",    "quadrature amplitude-shift keying (512)",   LIQUID_MODEM_QAM512, 9},
+    {"qam1024",   "quadrature amplitude-shift keying (1024)",  LIQUID_MODEM_QAM1024, 10},
+    {"qam2048",   "quadrature amplitude-shift keying (2048)",  LIQUID_MODEM_QAM2048, 11},
+    {"qam4096",   "quadrature amplitude-shift keying (4096)",  LIQUID_MODEM_QAM4096, 12},
+    {"qam8192",   "quadrature amplitude-shift keying (8192)",  LIQUID_MODEM_QAM8192, 13},
+    {"qam16384",  "quadrature amplitude-shift keying (16384)", LIQUID_MODEM_QAM16384, 14},
+    {"qam32768",  "quadrature amplitude-shift keying (32768)", LIQUID_MODEM_QAM32768, 15},
+    {"qam65536",  "quadrature amplitude-shift keying (65536)", LIQUID_MODEM_QAM65536, 16},
 
     // amplitude/phase-shift keying
     {"apsk4",     "amplitude/phase-shift keying (4)",   LIQUID_MODEM_APSK4,   2},
@@ -98,6 +106,7 @@ const struct modulation_type_s modulation_types[LIQUID_MODEM_NUM_SCHEMES] = {
     {"arb128opt", "arb128opt (optimal 128-qam)",   LIQUID_MODEM_ARB128OPT, 7},
     {"arb256opt", "arb256opt (optimal 256-qam)",   LIQUID_MODEM_ARB256OPT, 8},
     {"arb64vt",   "arb64vt (64-qam vt logo)",      LIQUID_MODEM_ARB64VT,   6},
+    {"arb64ui",   "arb64ui (64-qam ui logo)",      LIQUID_MODEM_ARB64UI,   6},
 
     // arbitrary modem type
     {"arb",       "arbitrary constellation",       LIQUID_MODEM_ARB,       0},
@@ -111,7 +120,7 @@ modulation_scheme liquid_getopt_str2mod(const char * _str)
     unsigned int i;
     for (i=0; i<LIQUID_MODEM_NUM_SCHEMES; i++) {
         if (strcmp(_str,modulation_types[i].name)==0)
-            return i;
+            return (modulation_scheme)i;
     }
     fprintf(stderr,"warning: liquid_getopt_str2mod(), unknown/unsupported mod scheme : %s\n", _str);
     return LIQUID_MODEM_UNKNOWN;
